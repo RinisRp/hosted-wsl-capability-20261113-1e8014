@@ -6,7 +6,7 @@ if(-not $OpaquePrivateHost -and -not [string]::IsNullOrWhiteSpace($opaquePacket)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='a51ed6f318ea42c386f9ed6a20523db4'
+$expectedNonce='e63941839f2c42eb9d328d394f1f4aae'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')

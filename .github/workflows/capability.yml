@@ -6,6 +6,12 @@
         "nonce": {
           "required": true,
           "type": "string"
+        },
+        "parent_diagnostic": {
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Only harmless parent failure diagnostics; no source/runtime acceptance"
         }
       }
     }
@@ -62,7 +68,43 @@
       "env": {
         "PROBE_NONCE": "${{ inputs.nonce }}"
       },
-      "runs-on": "windows-2025-vs2026"
+      "runs-on": "windows-2025-vs2026",
+      "if": "${{ !inputs.parent_diagnostic }}"
+    },
+    "parent_diagnostic": {
+      "env": {
+        "PROBE_NONCE": "${{ inputs.nonce }}",
+        "PARENT_DIAGNOSTIC": "true"
+      },
+      "runs-on": "windows-2025-vs2026",
+      "steps": [
+        {
+          "name": "Checkout frozen generic diagnostic",
+          "with": {
+            "persist-credentials": false
+          },
+          "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+        },
+        {
+          "name": "Diagnose owned parent boundary",
+          "shell": "powershell",
+          "id": "diagnostic",
+          "run": ".\\scripts\\diagnose-owned-parent-boundary.ps1"
+        },
+        {
+          "name": "Preserve bounded parent diagnostic",
+          "with": {
+            "name": "parent-diagnostic-${{ inputs.nonce }}",
+            "retention-days": 7,
+            "if-no-files-found": "error",
+            "path": "${{ steps.diagnostic.outputs.out_path }}"
+          },
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "if": "${{ always() && steps.diagnostic.outputs.out_path != '' }}"
+        }
+      ],
+      "if": "${{ inputs.parent_diagnostic }}",
+      "timeout-minutes": 5
     }
   }
 }

@@ -1,5 +1,6 @@
 # Generic hosted-only fixture. Never starts Runner.Listener/Worker or reads a packet.
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
+$baseOwned=$false;$stage='CONTEXT'
 try{
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64' -or $env:PROBE_NONCE -cnotmatch '\A[0-9a-f]{32}\z'){throw 'EXACT_GENERIC_HOSTED_BOUNDARY_CONTEXT_REQUIRED'}
 . (Join-Path $PSScriptRoot 'private-directory-helper.ps1')
@@ -15,6 +16,7 @@ $nativeText=Import-ExactFunction (Join-Path $PSScriptRoot 'probe-wsl.ps1') 'Nati
 $base=Join-Path $env:RUNNER_TEMP ('session-owner-control-'+$env:PROBE_NONCE)
 $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 New-OwnedPrivateDirectory $base $owner
+$baseOwned=$true;$stage='OWNER_CREATED'
 $grandchildSource=@'
 param([string]$Root,[string]$Nonce)
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
@@ -34,16 +36,17 @@ $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 if($Nonce -cne $env:PROBE_NONCE -or $Root -cnotmatch '\\session-owner-control-[0-9a-f]{32}\\case-[01]\z' -or $Mode -cnotin @('timeout-stall','early-failure')){throw 'SYNTHETIC_CHILD_CONTEXT_REQUIRED'}
 $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '+(Join-Path $Root 'grandchild.ps1')+' -Root '+$Root+' -Nonce '+$Nonce
-$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.WindowStyle='Hidden';$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
-# The grandchild never writes stdout/stderr. Its own bounded stop protocol
-# remains usable if this fixture parent exits without draining those pipes.
+$info.UseShellExecute=$true;$info.WindowStyle='Hidden'
+# ShellExecute creates an independent hidden console, without redirected
+# grandchild pipes or inherited fixture-parent output streams.
 $p=[Diagnostics.Process]::Start($info);$handle=$p.Handle
 if($null -eq $handle -or $handle -eq [IntPtr]::Zero){throw 'SYNTHETIC_HELD_GRANDCHILD_HANDLE_REQUIRED'}
+$descriptor=@{nonce=$Nonce;id=$p.Id;createdUTC=$p.StartTime.ToUniversalTime().ToString('o')}
+$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($descriptor|ConvertTo-Json -Compress));$file=[IO.File]::Open((Join-Path $Root 'grandchild.json'),'CreateNew','Write','None');try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
 $clock=[Diagnostics.Stopwatch]::StartNew();$ready=Join-Path $Root 'grandchild-ready.txt'
 while(-not (Test-Path -LiteralPath $ready) -and $clock.Elapsed.TotalSeconds -lt 4){Start-Sleep -Milliseconds 50}
 if(-not (Test-Path -LiteralPath $ready) -or [IO.File]::ReadAllText($ready) -cne $Nonce){throw 'SYNTHETIC_GRANDCHILD_NOT_READY'}
-$descriptor=@{nonce=$Nonce;id=$p.Id;createdUTC=$p.StartTime.ToUniversalTime().ToString('o')}
-$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($descriptor|ConvertTo-Json -Compress));$file=[IO.File]::Open((Join-Path $Root 'grandchild.json'),'CreateNew','Write','None');try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+
 if($Mode -ceq 'early-failure'){exit 17}
 $clock=[Diagnostics.Stopwatch]::StartNew()
 while($clock.Elapsed.TotalSeconds -lt 45){Start-Sleep -Milliseconds 100}
@@ -62,24 +65,29 @@ for($case=0;$case -lt 2;$case++){
  $stop=Join-Path $root 'stop.txt';$descriptorPath=Join-Path $root 'grandchild.json';$elapsed=[Diagnostics.Stopwatch]::StartNew();$caseFailure=$null;$cleanupFaults=@();$row=$null
  try{
   $file=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $stage='PARENT_NATIVE'
   $result=Native $file @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',(Join-Path $root 'child.ps1'),'-Root',$root,'-Nonce',$expectedNonce,'-Mode',$mode) 5 'synthetic-owner'
-  if(CleanNative $result){throw 'FAILED_PARENT_FALSELY_ACCEPTED'}
-  if(-not $result.closed -or $null -ne $result.nativeError -or $null -ne $result.cleanupError -or $result.stdout -cne '' -or $result.stderr -cne '' -or $elapsed.Elapsed.TotalSeconds -gt 25){throw 'BOUNDED_SYNTHETIC_PARENT_RESULT_REQUIRED'}
-  if($case -eq 0){if(-not $result.timedOut -or -not $result.onlyOwnStartedRootStopped){throw 'PARENT_TIMEOUT_NOT_OBSERVED'}}
-  elseif($result.timedOut -or $result.onlyOwnStartedRootStopped -or $result.exitCode -ne 17){throw 'EARLY_PARENT_FAILURE_NOT_OBSERVED'}
+  $parentElapsedSeconds=$elapsed.Elapsed.TotalSeconds;$stage='PARENT_RETURNED'
+
   $item=Get-Item -LiteralPath $descriptorPath -Force
   if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -gt 4096){throw 'BOUNDED_OWNED_DESCRIPTOR_REQUIRED'}
   $descriptor=[IO.File]::ReadAllText($descriptorPath)|ConvertFrom-Json
   if($descriptor.nonce -cne $expectedNonce -or ($descriptor.id -isnot [int] -and $descriptor.id -isnot [long]) -or $descriptor.id -lt 1 -or $descriptor.id -eq $result.pid){throw 'EXACT_DISTINCT_OWNED_GRANDCHILD_REQUIRED'}
   $descendant=[Diagnostics.Process]::GetProcessById($descriptor.id);$handle=$descendant.Handle
   if($null -eq $handle -or $handle -eq [IntPtr]::Zero -or $descendant.StartTime.ToUniversalTime().Ticks -ne ([datetime]$descriptor.createdUTC).ToUniversalTime().Ticks){throw 'EXACT_HELD_GRANDCHILD_GENERATION_REQUIRED'}
-  $held=$true
+  $held=$true;$stage='CHILD_PINNED'
   if($descendant.HasExited){throw 'PARENT_EXIT_DOES_NOT_PROVE_EXPECTED_LIVE_DESCENDANT'}
+  # Independently close the known child before asserting the negative parent outcome.
   $bytes=[Text.Encoding]::ASCII.GetBytes($expectedNonce);$file=[IO.File]::Open($stop,'CreateNew','Write','None');try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
   $wait=Remaining-OwnerWait 15000
   if($wait -eq 0 -or -not $descendant.WaitForExit($wait) -or $descendant.ExitCode -ne 0){throw 'INDEPENDENT_SYNTHETIC_CHILD_STOP_UNPROVED'}
-  $stopped=$true
-  $row=@{mode=$mode;failedParentRefused=$true;parentClosed=$true;knownDescendantOutlivedParent=$true;independentStopNatural0=$true}
+  $stopped=$true;$stage='CHILD_STOPPED'
+  if(CleanNative $result){throw 'FAILED_PARENT_FALSELY_ACCEPTED'}
+  $outputReadUnknown=$false
+  if(-not $result.closed -or $null -ne $result.nativeError -or $null -ne $result.cleanupError -or $result.stdout -cne '' -or $result.stderr -cne '' -or $parentElapsedSeconds -gt 25){throw 'BOUNDED_SYNTHETIC_PARENT_RESULT_REQUIRED'}
+  if($case -eq 0){if(-not $result.timedOut -or -not $result.onlyOwnStartedRootStopped){throw 'PARENT_TIMEOUT_NOT_OBSERVED'}}
+  elseif($result.timedOut -or $result.onlyOwnStartedRootStopped -or $result.exitCode -ne 17){throw 'EARLY_PARENT_FAILURE_NOT_OBSERVED'}
+  $row=@{mode=$mode;failedParentRefused=$true;parentClosed=$true;knownDescendantOutlivedParent=$true;independentStopNatural0=$true;parentOutputReadUnaccepted=$outputReadUnknown}
  }catch{$caseFailure=$_}
  finally{
   # A fixed nonce-owned file asks only these bounded fixture children to stop.
@@ -101,5 +109,18 @@ for($case=0;$case -lt 2;$case++){
  if($null -eq $row){throw 'SYNTHETIC_CASE_SUCCESS_UNPROVED'};$rows+=@($row)
 }
 if($ownerClock.Elapsed.TotalSeconds -ge 90){throw 'SYNTHETIC_OWNER_AGGREGATE_DEADLINE'}
-@{Scope='GENERIC_PARENT_BOUND_AND_INDEPENDENT_CHILD_STOP_ONLY';Cases=$rows.Count;AllPass=$true;KnownParentRootsClosed=2;KnownGrandchildrenNatural0=2;DirectDescendantContainmentClaimed=$false;GlobalProcessCensusClaimed=$false;RealPrivateSession=$false;RealCredentials=0;NetworkCalls=0;CanonicalAccepted=$false;ProviderRetirement='inference only; fixture files retained on owned temporary VM'}|ConvertTo-Json -Compress
-}catch{Write-Output 'GENERIC_PARENT_BOUNDARY_WITNESS_FAILED';exit 1}
+@{Scope='GENERIC_PARENT_BOUND_AND_INDEPENDENT_CHILD_STOP_ONLY';Cases=$rows.Count;AllPass=$true;ParentOutputReadUnacceptedCount=@($rows|Where-Object {$_.parentOutputReadUnaccepted}).Count;KnownParentRootsClosed=2;KnownGrandchildrenNatural0=2;DirectDescendantContainmentClaimed=$false;GlobalProcessCensusClaimed=$false;RealPrivateSession=$false;RealCredentials=0;NetworkCalls=0;CanonicalAccepted=$false;ProviderRetirement='inference only; fixture files retained on owned temporary VM'}|ConvertTo-Json -Compress
+}catch{
+ $allowed=@('EXACT_GENERIC_HOSTED_BOUNDARY_CONTEXT_REQUIRED','ONE_EXACT_BOUNDARY_FUNCTION_REQUIRED','SYNTHETIC_OWNER_AGGREGATE_BUDGET_EXHAUSTED','FAILED_PARENT_FALSELY_ACCEPTED','BOUNDED_SYNTHETIC_PARENT_RESULT_REQUIRED','PARENT_TIMEOUT_NOT_OBSERVED','EARLY_PARENT_FAILURE_NOT_OBSERVED','BOUNDED_OWNED_DESCRIPTOR_REQUIRED','EXACT_DISTINCT_OWNED_GRANDCHILD_REQUIRED','EXACT_HELD_GRANDCHILD_GENERATION_REQUIRED','PARENT_EXIT_DOES_NOT_PROVE_EXPECTED_LIVE_DESCENDANT','INDEPENDENT_SYNTHETIC_CHILD_STOP_UNPROVED','SYNTHETIC_CASE_SUCCESS_UNPROVED','SYNTHETIC_OWNER_AGGREGATE_DEADLINE')
+ $code=if($_.Exception.Message -cin $allowed){$_.Exception.Message}else{'UNCLASSIFIED_SYNTHETIC_BOUNDARY_FAILURE'}
+ if($baseOwned){
+  try{
+   $flags=$null
+   if($null -ne (Get-Variable result -ErrorAction SilentlyContinue)){$flags=@{closed=[bool]$result.closed;timedOut=[bool]$result.timedOut;ownRootStopped=[bool]$result.onlyOwnStartedRootStopped;outputReadFailure=($result.nativeError -ceq 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');otherNativeFailure=($null -ne $result.nativeError -and $result.nativeError -cne 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');cleanupFault=($null -ne $result.cleanupError)}}
+   $sidecar=@{Schema=1;Scope='GENERIC_SYNTHETIC_FAILURE_ONLY';Code=$code;Stage=$stage;Flags=$flags;PrivateSession=$false}
+   $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($sidecar|ConvertTo-Json -Depth 4 -Compress));if($bytes.Length -gt 8192){throw 'BOUNDED_SYNTHETIC_SIDECAR_REQUIRED'}
+   $stream=[IO.File]::Open((Join-Path $base 'failure-status.json'),'CreateNew','Write','None');try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+  }catch{}
+ }
+ Write-Output ('GENERIC_PARENT_BOUNDARY_WITNESS_FAILED:'+ $code);exit 1
+}

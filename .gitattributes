@@ -21,3 +21,4 @@ scripts/test-opaque-packet-controls.ps1 -text
 scripts/test-owned-private-directory.ps1 -text
 scripts/test-opaque-deadline-controls.ps1 -text
 scripts/test-owned-parent-boundary.ps1 -text
+scripts/diagnose-owned-parent-boundary.ps1 -text
