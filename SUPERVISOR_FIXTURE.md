@@ -30,3 +30,9 @@ This fixture cannot qualify a real private session, HTTP ACK transport, private
 job success, canonical database execution, memory erasure, descendant containment
 or long-duration endurance. The named private owner is not implemented or wired.
 Existing source/runtime qualification results remain bound to their own commits.
+
+Startup diagnostics advertise the exclusive public evidence root before launch.
+The owner validates that ordinary nonce-derived root before importing dependencies
+and records only fixed bootstrap stages and failure categories. These records
+remain diagnostic and do not grant readiness. Both the20-second ready deadline
+and240-second failure hold are unchanged.

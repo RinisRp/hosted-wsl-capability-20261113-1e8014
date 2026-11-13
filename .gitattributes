@@ -35,3 +35,4 @@ scripts/test-generic-fixture-records.ps1 -text
 scripts/test-generic-terminal-ack.ps1 -text
 scripts/test-owned-supervisor-lifetime.ps1 -text
 scripts/test-terminal-ack-gate.ps1 -text
+scripts/test-generic-fixture-bootstrap.ps1 -text

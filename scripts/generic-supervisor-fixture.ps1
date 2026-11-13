@@ -41,6 +41,9 @@ if($Mode -ceq 'start'){
   Write-FixtureJson (Join-Path $keyRoot 'key-created.json') ([ordered]@{Schema=1;Scope='OWNED_SYNTHETIC_KEY_CREATED_ONLY';Nonce=$nonce;KeyName=$keyName;SourceHead=$env:GITHUB_SHA;PublicRun=$env:GITHUB_RUN_ID;Attempt=1;KeyFingerprint=(Get-GenericAckKeyFingerprint $wire)})
   $ctx=New-Context (Get-GenericAckKeyFingerprint $wire);$root=New-OwnedSupervisorContext $ctx $wire 'fixture'
   Write-FixtureJson (Join-Path $root 'fixture-plan.json') ([ordered]@{Schema=1;Case=$Case;KeyName=$keyName})
+  # Failure evidence must remain collectible even if the owner never becomes
+  # ready. This output is an owned path only and grants no readiness authority.
+  [IO.File]::AppendAllText($env:GITHUB_OUTPUT,('out_path='+$root+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
   $launch=Start-OwnedDetachedSupervisor $ctx 'fixture';$held=Hold-OwnedSupervisorGeneration $ctx 'fixture'
   try{
    $clock=[Diagnostics.Stopwatch]::StartNew();$marker=Join-Path $root 'owner-started.json'
@@ -49,7 +52,6 @@ if($Mode -ceq 'start'){
    Assert-FixtureReady $ready $held
    $started=$true
   }finally{$held.Process.Dispose()}
-  [IO.File]::AppendAllText($env:GITHUB_OUTPUT,('out_path='+$root+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
   Write-Output 'SYNTHETIC_DETACHED_OWNER_STARTED_NO_PRIVATE_JOB'
  }catch{$primaryFailed=$true;throw}finally{
   $cleanupFailed=$false
