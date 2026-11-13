@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$nonce='90e620c965b847819f8a4b4205cf8027'
+$nonce='6566f2cbfb624edcb50ca54f6bc7a2ca'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:PROBE_NONCE -cne $nonce -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64'){throw 'EXACT_GENERIC_SOURCE_QUALIFICATION_CONTEXT_REQUIRED'}
 if($env:RUNNER_TEMP -cnotmatch '\A[A-Z]:\\[A-Za-z0-9_\\-]+\z'){throw 'OWNED_TEMP_PATH_REQUIRED'}
 $root=Join-Path $env:RUNNER_TEMP ('bridge-source-'+$nonce)
@@ -52,7 +52,7 @@ function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem){
 $repo=Split-Path -Parent $PSScriptRoot
 $paths=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/generic-host-disposition.ps1','scripts/opaque-private-session.ps1','scripts/private-directory-helper.ps1','scripts/run-opaque-private-session.ps1','scripts/test-generic-host-disposition.ps1','scripts/test-opaque-lifecycle-controls.ps1','scripts/test-opaque-packet-controls.ps1','scripts/test-owned-private-directory.ps1','scripts/test-opaque-deadline-controls.ps1','scripts/test-owned-parent-boundary.ps1','scripts/diagnose-owned-parent-boundary.ps1')
 function SourceManifest{$m=[ordered]@{};foreach($rel in $paths){$m[$rel]=(Get-FileHash -LiteralPath (Join-Path $repo $rel)).Hash.ToLowerInvariant()};return $m}
-$result=[ordered]@{Schema=1;Scope='GENERIC_BRIDGE_SOURCE_QUALIFICATION_ONLY';Nonce=$nonce;SourceHead=$env:GITHUB_SHA;SourceManifest=(SourceManifest);CompilerVersion='go1.26.11';CompilerArchiveSHA256='71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0';Phases=@();OriginalSourceUnchanged=$false;RequiresFormatting=$null;BinarySHA256=$null;SourceQualified=$false;WSLCalls=0;DockerCalls=0;ProductionBridgeMainExecuted=$false;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false;Failure=$null;ResultFilePublished=$false;FinishedUTC=$null}
+$result=[ordered]@{Schema=1;Scope='GENERIC_BRIDGE_SOURCE_QUALIFICATION_ONLY';Nonce=$nonce;SourceHead=$env:GITHUB_SHA;SourceManifest=(SourceManifest);CompilerVersion='go1.26.11';CompilerArchiveSHA256='71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0';Phases=@();OriginalSourceUnchanged=$false;RequiresFormatting=$null;BinarySHA256=$null;SourceQualified=$false;ParentFailureSidecarPublished=$false;WSLCalls=0;DockerCalls=0;ProductionBridgeMainExecuted=$false;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false;Failure=$null;ResultFilePublished=$false;FinishedUTC=$null}
 $saved=[ordered]@{}
 $names=@('GOTOOLCHAIN','GOPROXY','GOSUMDB','GOMODCACHE','GOCACHE','GOPATH','GOENV','GOWORK','CGO_ENABLED','GOOS','GOARCH','GOAMD64','GOFLAGS','GOEXPERIMENT')
 foreach($key in $names){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -86,7 +86,18 @@ try{
  foreach($v in $vectors){
   $p=Native $v.file $v.args $v.seconds $v.name
   $result.Phases+=@{Name=$v.name;Result=$p}
-  if($p.exitCode -ne 0 -or -not $p.closed -or $p.timedOut -or $p.onlyOwnStartedRootStopped -or $null -ne $p.nativeError -or $null -ne $p.cleanupError){throw ('SOURCE_PHASE_FAILED_'+$v.name)}
+  if($p.exitCode -ne 0 -or -not $p.closed -or $p.timedOut -or $p.onlyOwnStartedRootStopped -or $null -ne $p.nativeError -or $null -ne $p.cleanupError){
+   if($v.name -ceq 'owned-parent-boundary-controls'){
+    try{
+     $sidecar=Join-Path $env:RUNNER_TEMP ('session-owner-control-'+$nonce+'\failure-status.json');$item=Get-Item -LiteralPath $sidecar -Force
+     if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -lt 1 -or $item.Length -gt 8192){throw 'BOUNDED_SYNTHETIC_PARENT_SIDECAR_REQUIRED'}
+     $bytes=[IO.File]::ReadAllBytes($sidecar);if($bytes.Length -gt 8192){throw 'BOUNDED_SYNTHETIC_PARENT_SIDECAR_REQUIRED'}
+     $file=[IO.File]::Open((Join-Path $out 'owned-parent-failure-status.json'),'CreateNew','Write','None');try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+     $result.ParentFailureSidecarPublished=$true
+    }catch{}
+   }
+   throw ('SOURCE_PHASE_FAILED_'+$v.name)
+  }
  }
  if($result.Phases[0].Result.stdout.Trim() -cne 'go version go1.26.11 windows/amd64'){throw 'EXACT_COMPILER_VERSION_REQUIRED'}
  $result.RequiresFormatting=([IO.File]::ReadAllText((Join-Path $out 'formatted-main.stdout.txt')) -cne [IO.File]::ReadAllText((Join-Path $repo 'scripts/wsl_npipe_bridge_windows.go')) -or [IO.File]::ReadAllText((Join-Path $out 'formatted-tests.stdout.txt')) -cne [IO.File]::ReadAllText((Join-Path $repo 'scripts/wsl_npipe_bridge_windows_test.go')))
