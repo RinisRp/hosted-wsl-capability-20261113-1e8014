@@ -3,3 +3,8 @@
 scripts/probe-wsl.ps1 -text
 scripts/probe-linux-engine.sh -text
 README.md -text
+go.mod -text
+go.sum -text
+scripts/wsl_npipe_bridge_windows.go -text
+scripts/wsl_npipe_bridge_windows_test.go -text
+scripts/qualify-bridge-source.ps1 -text

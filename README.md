@@ -1,3 +1,10 @@
+## Adapter source qualification branch
+
+This branch only compiles and tests the generic Windows pipe adapter using Go1.26.11, Microsoft go-winio0.6.4 and x/sys0.49.0. It never starts the production adapter, WSL or Docker. Unit tests create nonce-owned local pipes and owned echo-test subprocesses. The workflow preserves unchanged source hashes, bounded diagnostics and formatter output without modifying source inputs. A successful source check does not establish real Docker transport, loopback behavior, private-project access, JIT or canonical acceptance.
+
+The Microsoft library supplies retained first-handle ownership, remote-client rejection and byte-mode I/O cancellation. The adapter supplies explicit protected owner/System access, minimal child environments, bounded shutdown, independent endpoint closes, native-exit and pump accounting, and no payload logging. SDK Close completion is not reported as independently checked Win32 handle-close errors. Generated-descriptor tests are explicitly distinguished from actual ACL readback.
+
+The sections below describe the already qualified generic kernel/engine probe on the unchanged default branch.
 # Hosted WSL and Linux Docker capability probe
 
 This manually dispatched diagnostic measures a fresh hosted Windows VM. It verifies one owned WSL2 distribution, a pinned Linux Docker engine and tiny network-isolated container, actual free physical RAM bracketed by same-engine readiness checks, and cleanup of the owned distribution. The diagnostic requires at least 6144 MiB free RAM; failed or unknown outcomes remain failures.

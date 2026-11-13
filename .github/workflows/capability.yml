@@ -1,5 +1,5 @@
 {
-  "name": "Generic hosted WSL and Linux Docker capability",
+  "name": "Generic Windows pipe bridge source qualification",
   "on": {
     "workflow_dispatch": {
       "inputs": {
@@ -14,38 +14,38 @@
     "contents": "read"
   },
   "jobs": {
-    "probe": {
-      "runs-on": "windows-2025-vs2026",
-      "env": {
-        "PROBE_NONCE": "${{ inputs.nonce }}"
-      },
+    "source": {
       "timeout-minutes": 15,
       "steps": [
         {
-          "name": "Checkout exact generic capability source",
+          "name": "Checkout frozen generic bridge source",
           "with": {
             "persist-credentials": false
           },
           "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
         },
         {
-          "name": "Probe owned WSL and Linux engine",
-          "shell": "powershell",
-          "id": "probe",
-          "run": ".\\scripts\\probe-wsl.ps1"
+          "name": "Qualify source with pinned Go",
+          "id": "source",
+          "run": ".\\scripts\\qualify-bridge-source.ps1",
+          "shell": "powershell"
         },
         {
-          "name": "Preserve capability evidence",
+          "name": "Preserve bounded source qualification",
+          "if": "${{ always() && steps.source.outputs.out_path != '' }}",
           "with": {
+            "name": "bridge-source-${{ inputs.nonce }}",
             "retention-days": 7,
-            "name": "hosted-capability-${{ inputs.nonce }}",
-            "path": "${{ steps.probe.outputs.out_path }}",
+            "path": "${{ steps.source.outputs.out_path }}",
             "if-no-files-found": "error"
           },
-          "if": "${{ always() && steps.probe.outputs.out_path != '' }}",
           "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         }
-      ]
+      ],
+      "env": {
+        "PROBE_NONCE": "${{ inputs.nonce }}"
+      },
+      "runs-on": "windows-2025-vs2026"
     }
   }
 }
