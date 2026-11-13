@@ -14,7 +14,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
  function Fields($Data,[string[]]$Keys){return ($null -ne $Data -and $Data -is [pscustomobject] -and (@($Data.PSObject.Properties.Name|Sort-Object) -join '|') -ceq (@($Keys|Sort-Object) -join '|'))}
  function Integer($Value){return ($Value -is [int] -or $Value -is [long])}
  function SourceManifestValid($Data){
-  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh')
+  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/owned-directory-helper.ps1','scripts/test-owned-directory.ps1')
   if(-not (Fields $Data $keys)){return $false}
   foreach($key in $keys){if($Data.$key -isnot [string] -or $Data.$key -cnotmatch '\A[0-9a-f]{64}\z'){return $false}}
   return $true

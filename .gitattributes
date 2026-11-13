@@ -11,3 +11,5 @@ scripts/qualify-bridge-source.ps1 -text
 scripts/probe-windows-bridge.ps1 -text
 scripts/capability-http.sh -text
 scripts/capability-exec.sh -text
+scripts/owned-directory-helper.ps1 -text
+scripts/test-owned-directory.ps1 -text
