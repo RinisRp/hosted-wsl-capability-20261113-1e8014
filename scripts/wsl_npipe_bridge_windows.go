@@ -64,6 +64,7 @@ type bridge struct {
 	records                                    []relayRecord
 	faults                                     []string
 	accepted                                   int
+	maxAccepted                                int
 	stopping                                   bool
 	connectionLimit                            time.Duration
 }
@@ -78,7 +79,11 @@ func currentOwnerSDDL() (string, string, error) {
 }
 
 func openBridge(nonce, distribution string, factory func(string) *exec.Cmd, connectionLimit time.Duration) (*bridge, error) {
-	if !noncePattern.MatchString(nonce) || distribution != "hosted-wsl-"+nonce || factory == nil || connectionLimit <= 0 {
+	return openBridgeWithLimit(nonce, distribution, factory, connectionLimit, 128)
+}
+
+func openBridgeWithLimit(nonce, distribution string, factory func(string) *exec.Cmd, connectionLimit time.Duration, maxAccepted int) (*bridge, error) {
+	if !noncePattern.MatchString(nonce) || distribution != "hosted-wsl-"+nonce || factory == nil || connectionLimit <= 0 || connectionLimit > 90*time.Minute || maxAccepted < 1 || maxAccepted > 4096 {
 		return nil, errors.New("EXACT_OWN_DISTRIBUTION_AND_NONCE_REQUIRED")
 	}
 	sid, sddl, err := currentOwnerSDDL()
@@ -91,7 +96,7 @@ func openBridge(nonce, distribution string, factory func(string) *exec.Cmd, conn
 		return nil, errors.New("FRESH_LOCAL_PIPE_REQUIRED")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	b := &bridge{nonce: nonce, distribution: distribution, path: path, endpoint: "npipe:////./pipe/hosted_wsl_" + nonce, owner: sid, listener: listener, acceptDone: make(chan struct{}), ctx: ctx, cancel: cancel, factory: factory, active: make(map[int]*relay), connectionLimit: connectionLimit}
+	b := &bridge{nonce: nonce, distribution: distribution, path: path, endpoint: "npipe:////./pipe/hosted_wsl_" + nonce, owner: sid, listener: listener, acceptDone: make(chan struct{}), ctx: ctx, cancel: cancel, factory: factory, active: make(map[int]*relay), connectionLimit: connectionLimit, maxAccepted: maxAccepted}
 	go b.accept()
 	return b, nil
 }
@@ -109,7 +114,7 @@ func (b *bridge) accept() {
 			return
 		}
 		b.mu.Lock()
-		if b.stopping || b.accepted >= 128 || len(b.active) >= 32 {
+		if b.stopping || b.accepted >= b.maxAccepted || len(b.active) >= 32 {
 			b.faults = append(b.faults, "CONNECTION_ADMISSION_REFUSED")
 			b.mu.Unlock()
 			go conn.Close()
@@ -479,19 +484,30 @@ func minimalWindowsEnvironment() []string {
 }
 
 func launchWSL(distribution string) *exec.Cmd {
+	return launchWSLDrain(distribution, 120)
+}
+
+func launchWSLDrain(distribution string, drainSeconds int) *exec.Cmd {
 	wsl := filepath.Join(os.Getenv("SystemRoot"), "System32", "wsl.exe")
-	cmd := exec.Command(wsl, "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "-t", "120", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
+	cmd := exec.Command(wsl, "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "-t", fmt.Sprint(drainSeconds), "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
 	cmd.Env = minimalWindowsEnvironment()
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd
 }
 
 func writeExclusive(path string, value any) error {
+	return writeExclusiveLimit(path, value, 131072)
+}
+
+func writeExclusiveLimit(path string, value any, limit int) error {
+	if limit != 131072 && limit != 8388608 {
+		return errors.New("FIXED_JSON_BOUND_REQUIRED")
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if len(data) > 131072 {
+	if len(data) > limit {
 		return errors.New("REPORT_BOUND_EXCEEDED")
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -510,12 +526,24 @@ func writeExclusive(path string, value any) error {
 	return cerr
 }
 
+func bridgeProfile(name string) (time.Duration, time.Duration, int, int, error) {
+	switch name {
+	case "capability":
+		return 10 * time.Minute, 120 * time.Second, 120, 128, nil
+	case "extended":
+		return 120 * time.Minute, 90 * time.Minute, 5400, 4096, nil
+	default:
+		return 0, 0, 0, 0, errors.New("FIXED_BOUNDED_BRIDGE_PROFILE_REQUIRED")
+	}
+}
+
 func runMain() int {
 	nonce := flag.String("nonce", "", "")
 	distro := flag.String("distribution", "", "")
 	ready := flag.String("ready", "", "")
 	stop := flag.String("stop", "", "")
 	reportPath := flag.String("report", "", "")
+	profile := flag.String("profile", "capability", "")
 	flag.Parse()
 	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "RinisRp/hosted-wsl-capability-20261113-1e8014" || os.Getenv("GITHUB_ACTOR") != "RinisRp" || os.Getenv("GITHUB_REF") != "refs/heads/codex/wsl-npipe-6f3465" || os.Getenv("PROBE_NONCE") != *nonce || !noncePattern.MatchString(*nonce) {
 		fmt.Fprintln(os.Stderr, "EXACT_GENERIC_HOSTED_BRIDGE_CONTEXT_REQUIRED")
@@ -527,17 +555,22 @@ func runMain() int {
 		fmt.Fprintln(os.Stderr, "OWN_NONCE_OUTPUT_PATHS_REQUIRED")
 		return 2
 	}
-	b, err := openBridge(*nonce, *distro, launchWSL, 120*time.Second)
+	lifetime, connectionLimit, drainSeconds, maxAccepted, err := bridgeProfile(*profile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "FIXED_BOUNDED_BRIDGE_PROFILE_REQUIRED")
+		return 2
+	}
+	b, err := openBridgeWithLimit(*nonce, *distro, func(distribution string) *exec.Cmd { return launchWSLDrain(distribution, drainSeconds) }, connectionLimit, maxAccepted)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "BRIDGE_OPEN_FAILED")
 		return 3
 	}
-	if writeExclusive(*ready, map[string]any{"Schema": 1, "Nonce": *nonce, "Endpoint": b.endpoint, "OwnerSID": b.owner, "PID": os.Getpid(), "PayloadLogged": false}) != nil {
+	if writeExclusive(*ready, map[string]any{"Schema": 1, "Nonce": *nonce, "Endpoint": b.endpoint, "OwnerSID": b.owner, "PID": os.Getpid(), "PayloadLogged": false, "Profile": *profile}) != nil {
 		_ = b.stop(15 * time.Second)
 		fmt.Fprintln(os.Stderr, "READY_PUBLICATION_FAILED")
 		return 3
 	}
-	deadline := time.Now().Add(10 * time.Minute)
+	deadline := time.Now().Add(lifetime)
 	validStop := false
 	for time.Now().Before(deadline) {
 		f, err := os.Open(*stop)
@@ -557,7 +590,7 @@ func runMain() int {
 		report.Faults = append(report.Faults, "VALID_OWNED_STOP_NOT_OBSERVED")
 		report.Qualified = false
 	}
-	if writeExclusive(*reportPath, report) != nil {
+	if writeExclusiveLimit(*reportPath, report, 8388608) != nil {
 		fmt.Fprintln(os.Stderr, "REPORT_PUBLICATION_FAILED")
 		return 4
 	}

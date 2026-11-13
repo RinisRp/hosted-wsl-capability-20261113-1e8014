@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -396,6 +397,84 @@ func TestWSLCommandHasFinitePostEOFDrain(t *testing.T) {
 	expected := []string{filepath.Join(os.Getenv("SystemRoot"), "System32", "wsl.exe"), "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "-t", "120", "STDIO", "UNIX-CONNECT:/var/run/docker.sock"}
 	if strings.Join(cmd.Args, "|") != strings.Join(expected, "|") {
 		t.Fatal("finite post-EOF drain contract missing")
+	}
+}
+
+func TestBridgeProfilesAreFixedAndBounded(t *testing.T) {
+	lifetime, limit, drain, count, err := bridgeProfile("capability")
+	if err != nil || lifetime != 10*time.Minute || limit != 120*time.Second || drain != 120 || count != 128 {
+		t.Fatal("capability profile changed")
+	}
+	lifetime, limit, drain, count, err = bridgeProfile("extended")
+	if err != nil || lifetime != 120*time.Minute || limit != 90*time.Minute || drain != 5400 || count != 4096 {
+		t.Fatal("extended profile must remain finite and fixed")
+	}
+	for _, name := range []string{"", "Extended", "extended-forever", "120"} {
+		if _, _, _, _, err = bridgeProfile(name); err == nil {
+			t.Fatal("unknown profile accepted")
+		}
+	}
+}
+
+func TestExtendedConstructorRefusesInvalidLimits(t *testing.T) {
+	nonce := freshNonce(t)
+	factory := helperCommand("echo")
+	for _, limit := range []time.Duration{0, -time.Second, 90*time.Minute + time.Nanosecond} {
+		if b, err := openBridgeWithLimit(nonce, "hosted-wsl-"+nonce, factory, limit, 4096); err == nil || b != nil {
+			t.Fatal("invalid connection lifetime accepted")
+		}
+	}
+	for _, count := range []int{0, -1, 4097} {
+		if b, err := openBridgeWithLimit(nonce, "hosted-wsl-"+nonce, factory, time.Second, count); err == nil || b != nil {
+			t.Fatal("invalid accepted-connection cap accepted")
+		}
+	}
+	b, err := openBridgeWithLimit(nonce, "hosted-wsl-"+nonce, factory, time.Second, 4096)
+	if err != nil {
+		t.Fatal("bounded extended constructor failed")
+	}
+	if b.maxAccepted != 4096 {
+		t.Fatal("extended connection cap was not installed")
+	}
+	report := b.stop(time.Second)
+	if report.Qualified || !report.ListenerCloseCompleted || !report.AcceptLoopFinished || !report.EndpointAbsentObserved {
+		t.Fatal("unused extended fixture did not close conservatively")
+	}
+}
+
+func TestExtendedReportEnvelopeIsBoundedAndReadable(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		report := bridgeReport{Schema: 1, Accepted: 4096, Completed: 4096}
+		for i := 0; i < 4096; i++ {
+			record := relayRecord{ID: i + 1, PID: 2147483647, InputBytes: 9223372036854775807, OutputBytes: 9223372036854775807, StartedBeforeUTC: "2026-11-13T23:59:59.999999999Z", Qualified: !failed}
+			if failed {
+				for j := 0; j < 16; j++ {
+					record.Faults = append(record.Faults, strings.Repeat("F", 64))
+				}
+			}
+			report.Records = append(report.Records, record)
+		}
+		path := filepath.Join(t.TempDir(), "bridge-report.json")
+		if err := writeExclusiveLimit(path, report, 8388608); err != nil {
+			t.Fatal("maximum record envelope could not be published")
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) <= 131072 || len(data) > 8388608 {
+			t.Fatal("maximum report did not respect its separate byte bound")
+		}
+		var decoded bridgeReport
+		if json.Unmarshal(data, &decoded) != nil || len(decoded.Records) != 4096 {
+			t.Fatal("maximum record envelope was not readable")
+		}
+	}
+	if writeExclusiveLimit(filepath.Join(t.TempDir(), "oversize.json"), strings.Repeat("X", 8388609), 8388608) == nil {
+		t.Fatal("oversized extended report accepted")
+	}
+	if writeExclusiveLimit(filepath.Join(t.TempDir(), "arbitrary.json"), "value", 99999999) == nil {
+		t.Fatal("arbitrary report bound accepted")
+	}
+	if writeExclusive(filepath.Join(t.TempDir(), "ready.json"), strings.Repeat("X", 131073)) == nil {
+		t.Fatal("small ready-file bound was widened")
 	}
 }
 

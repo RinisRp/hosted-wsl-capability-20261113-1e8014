@@ -10,7 +10,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   if(-not (CleanNative $x)){throw ('OWN_ENDPOINT_NATIVE_FAILED_'+$Stem)}
   return $x.stdout.Trim()
  }
- function ReadBoundedJSON([string]$Path){if((Get-Item -LiteralPath $Path).Length -gt 131072){throw 'BOUNDED_BRIDGE_JSON_REQUIRED'};return ([IO.File]::ReadAllText($Path)|ConvertFrom-Json)}
+ function ReadBoundedJSON([string]$Path){$limit=if([IO.Path]::GetFileName($Path) -ceq 'bridge-report.json'){8388608}else{131072};if((Get-Item -LiteralPath $Path).Length -gt $limit){throw 'BOUNDED_BRIDGE_JSON_REQUIRED'};return ([IO.File]::ReadAllText($Path)|ConvertFrom-Json)}
  function Fields($Data,[string[]]$Keys){return ($null -ne $Data -and $Data -is [pscustomobject] -and (@($Data.PSObject.Properties.Name|Sort-Object) -join '|') -ceq (@($Keys|Sort-Object) -join '|'))}
  function Integer($Value){return ($Value -is [int] -or $Value -is [long])}
  function SourceManifestValid($Data){
@@ -20,8 +20,8 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   return $true
  }
  function ReadyValid($Data,[string]$Owner,[int]$PIDValue){
-  if(-not (Fields $Data @('Schema','Nonce','Endpoint','OwnerSID','PID','PayloadLogged'))){return $false}
-  return ((Integer $Data.Schema) -and $Data.Schema -eq 1 -and (Integer $Data.PID) -and $Data.PID -eq $PIDValue -and $PIDValue -gt 0 -and $Data.Nonce -is [string] -and $Data.Nonce -ceq $Nonce -and $Data.Endpoint -is [string] -and $Data.Endpoint -ceq $r.Endpoint -and $Data.OwnerSID -is [string] -and $Data.OwnerSID -ceq $Owner -and $Data.PayloadLogged -is [bool] -and $Data.PayloadLogged -ceq $false)
+  if(-not (Fields $Data @('Schema','Nonce','Endpoint','OwnerSID','PID','PayloadLogged','Profile'))){return $false}
+  return ((Integer $Data.Schema) -and $Data.Schema -eq 1 -and (Integer $Data.PID) -and $Data.PID -eq $PIDValue -and $PIDValue -gt 0 -and $Data.Nonce -is [string] -and $Data.Nonce -ceq $Nonce -and $Data.Endpoint -is [string] -and $Data.Endpoint -ceq $r.Endpoint -and $Data.OwnerSID -is [string] -and $Data.OwnerSID -ceq $Owner -and $Data.PayloadLogged -is [bool] -and $Data.PayloadLogged -ceq $false -and $Data.Profile -is [string] -and $Data.Profile -ceq 'extended')
  }
  function ReportValid($Data){
   $keys=@('UnknownRoots','UnknownPumps','UnknownConnectionCloses','Schema','Nonce','Endpoint','OwnerSID','SDK','Accepted','Completed','Active','ListenerCloseCompleted','AcceptLoopFinished','EndpointAbsentObserved','SDKKernelCloseErrorsChecked','PayloadLogged','Qualified','Records','Faults')
@@ -30,7 +30,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   foreach($key in @('Nonce','Endpoint','OwnerSID','SDK')){if($Data.$key -isnot [string]){return $false}}
   foreach($key in @('ListenerCloseCompleted','AcceptLoopFinished','EndpointAbsentObserved','Qualified')){if($Data.$key -isnot [bool] -or $Data.$key -cne $true){return $false}}
   foreach($key in @('SDKKernelCloseErrorsChecked','PayloadLogged')){if($Data.$key -isnot [bool] -or $Data.$key -cne $false){return $false}}
-  if($Data.Schema -ne 1 -or $Data.Nonce -cne $Nonce -or $Data.Endpoint -cne $r.Endpoint -or $Data.OwnerSID -cne $r.Ready.OwnerSID -or $Data.SDK -cne 'github.com/Microsoft/go-winio@v0.6.4' -or $Data.Accepted -lt 1 -or $Data.Accepted -gt 128 -or $Data.Accepted -ne $Data.Completed -or $Data.Completed -ne @($Data.Records).Count -or $Data.Active -ne 0 -or $Data.UnknownRoots -ne 0 -or $Data.UnknownPumps -ne 0 -or $Data.UnknownConnectionCloses -ne 0 -or ($null -ne $Data.Faults -and @($Data.Faults).Count -ne 0)){return $false}
+  if($Data.Schema -ne 1 -or $Data.Nonce -cne $Nonce -or $Data.Endpoint -cne $r.Endpoint -or $Data.OwnerSID -cne $r.Ready.OwnerSID -or $Data.SDK -cne 'github.com/Microsoft/go-winio@v0.6.4' -or $Data.Accepted -lt 1 -or $Data.Accepted -gt 4096 -or $Data.Accepted -ne $Data.Completed -or $Data.Completed -ne @($Data.Records).Count -or $Data.Active -ne 0 -or $Data.UnknownRoots -ne 0 -or $Data.UnknownPumps -ne 0 -or $Data.UnknownConnectionCloses -ne 0 -or ($null -ne $Data.Faults -and @($Data.Faults).Count -ne 0)){return $false}
   $ids=@()
   foreach($record in $Data.Records){
    $recordKeys=@('Cancelled','ContextValidAtStart','ContextValidAtCompletion','ID','PID','ExitCode','RootStarted','RootWaitObserved','InputFinished','OutputFinished','StderrFinished','SDKCloseCompleted','FilesClosed','Forced','TimedOut','StderrOverflow','Qualified','StartedBeforeUTC','InputBytes','OutputBytes','StderrBytes','Faults')
@@ -101,7 +101,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   $config=Join-Path $Root 'empty-docker-config';if(Test-Path -LiteralPath $config){throw 'FRESH_EMPTY_DOCKER_CONFIG_REQUIRED'};[void][IO.Directory]::CreateDirectory($config)
   $docker=(Get-Command docker.exe -ErrorAction Stop).Source;$prefix=@('--config',$config,'--host',$r.Endpoint)
   if(@(PortListeners).Count){throw 'UNUSED_WINDOWS_LOOPBACK_PORT_REQUIRED'}
-  $p=Start-Process -FilePath $binary -ArgumentList @('--nonce',$Nonce,'--distribution',$Distribution,'--ready',$ready,'--stop',$stop,'--report',$report) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'bridge-main.stdout') -RedirectStandardError (Join-Path $Root 'bridge-main.stderr')
+  $p=Start-Process -FilePath $binary -ArgumentList @('--nonce',$Nonce,'--profile','extended','--distribution',$Distribution,'--ready',$ready,'--stop',$stop,'--report',$report) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'bridge-main.stdout') -RedirectStandardError (Join-Path $Root 'bridge-main.stderr')
   $bridgeStarted=$true
   $r.BridgeProcess=[ordered]@{PID=$null;CreatedUTC=$null;Closed=$false;ExitCode=$null;Forced=$false;CleanupError=$null}
   $handle=$p.Handle;if($null -eq $handle -or $handle -eq [IntPtr]::Zero){throw 'HELD_OWN_BRIDGE_PROCESS_HANDLE_REQUIRED'};$held=$true
