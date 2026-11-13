@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='c4595f09cf42486dbce4cec7967695e9'
+$expectedNonce='30cca2f6fd5a44339d58d43570734378'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')
@@ -9,7 +9,7 @@ $contextChecks=[ordered]@{
  exactActor=($env:GITHUB_ACTOR -ceq 'RinisRp')
  exactImage=($env:ImageOS -ceq 'win25-vs2026')
  exactArchitecture=($env:RUNNER_ARCH -ceq 'X64')
- exactRef=($env:GITHUB_REF -ceq 'refs/heads/main')
+ exactRef=($env:GITHUB_REF -ceq 'refs/heads/codex/wsl-npipe-6f3465')
  exactNonce=($env:PROBE_NONCE -ceq $expectedNonce)
 }
 $imageEnum=switch -CaseSensitive ($env:ImageOS){'win25'{'WIN25'} 'win25-vs2026'{'WIN25_VS2026'} $null{'MISSING'} default{'OTHER'}}
@@ -83,7 +83,7 @@ function OwnRegistration{
  if(-not (Test-Path -LiteralPath $key)){return @()}
  return @(Get-ChildItem -LiteralPath $key|ForEach-Object {Get-ItemProperty -LiteralPath $_.PSPath}|Where-Object {$_.DistributionName -ceq $name})
 }
-$result=[ordered]@{schema=1;scope='GENERIC_HOSTED_WSL2_LINUX_DOCKER_CAPABILITY_ONLY';nonce=$expectedNonce;sourceHead=$env:GITHUB_SHA;sourceScriptSHA256=(Get-FileHash -LiteralPath $PSCommandPath).Hash.ToLowerInvariant();imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;runnerEnvironment=$env:RUNNER_ENVIRONMENT;machineModel=$machine.Model;totalPhysicalBytes=$machine.TotalPhysicalMemory;beforeFreeMiB=[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024);features=$null;cpu=$null;wslVersion=$null;dockerInfo=$null;linuxDocker=$null;linuxEngine=$null;linuxDockerProved=$false;linuxScriptSHA256=$null;engineAfterMemory=$null;engineLiveAfterMemory=$false;memoryMeasuredUtc=$null;importAttempted=$false;import=$null;uname=$null;registeredVersion=$null;afterKernelFreeMiB=$null;cleanup=$null;cleanupVerified=$false;kernelStarted=$false;candidateHeadroom6144=$false;databaseCapabilityGranted=$false;canonicalAccepted=$false;projectRunnerRegistrationPerformed=$false;externalRepositoryChanged=$false;securitySettingsChanged=$false;globalWslShutdownUsed=$false;importOperationClosureProved=$false;resultFilePublished=$false;failure=$null;finishedUtc=$null}
+$result=[ordered]@{schema=1;scope='GENERIC_HOSTED_WSL2_LINUX_DOCKER_CAPABILITY_ONLY';nonce=$expectedNonce;sourceHead=$env:GITHUB_SHA;sourceScriptSHA256=(Get-FileHash -LiteralPath $PSCommandPath).Hash.ToLowerInvariant();imageOS=$env:ImageOS;imageVersion=$env:ImageVersion;runnerEnvironment=$env:RUNNER_ENVIRONMENT;machineModel=$machine.Model;totalPhysicalBytes=$machine.TotalPhysicalMemory;beforeFreeMiB=[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024);features=$null;cpu=$null;wslVersion=$null;dockerInfo=$null;linuxDocker=$null;linuxEngine=$null;linuxDockerProved=$false;windowsBridge=$null;windowsBridgeQualified=$false;linuxScriptSHA256=$null;engineAfterMemory=$null;engineLiveAfterMemory=$false;memoryMeasuredUtc=$null;importAttempted=$false;import=$null;uname=$null;registeredVersion=$null;afterKernelFreeMiB=$null;cleanup=$null;cleanupVerified=$false;kernelStarted=$false;candidateHeadroom6144=$false;databaseCapabilityGranted=$false;canonicalAccepted=$false;projectRunnerRegistrationPerformed=$false;externalRepositoryChanged=$false;securitySettingsChanged=$false;globalWslShutdownUsed=$false;importOperationClosureProved=$false;resultFilePublished=$false;failure=$null;finishedUtc=$null}
 try{
  $result.cpu=@(Get-CimInstance Win32_Processor|Select-Object VMMonitorModeExtensions,VirtualizationFirmwareEnabled,SecondLevelAddressTranslationExtensions)
  $result.features=@(foreach($feature in @('Microsoft-Windows-Subsystem-Linux','VirtualMachinePlatform')){$f=Get-WindowsOptionalFeature -Online -FeatureName $feature;[ordered]@{name=$feature;state=[string]$f.State}})
@@ -118,13 +118,17 @@ try{
  $e=$result.linuxEngine
  $result.linuxDockerProved=Test-LinuxEngineResult $e $expectedNonce
  if(-not $result.linuxDockerProved){throw 'ACTUAL_PINNED_LINUX_ENGINE_AND_CONTAINER_CLEANUP_REQUIRED'}
+ . (Join-Path $PSScriptRoot 'probe-windows-bridge.ps1')
+ $result.windowsBridge=Invoke-WindowsBridgeProbe $root $out $expectedNonce $name $result.linuxEngine.engineId
+ $result.windowsBridgeQualified=($null -ne $result.windowsBridge -and $result.windowsBridge.Qualified -ceq $true)
+ if(-not $result.windowsBridgeQualified){throw 'WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_NOT_QUALIFIED'}
  $result.afterKernelFreeMiB=[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024)
  $result.memoryMeasuredUtc=[datetime]::UtcNow.ToString('o')
  $result.engineAfterMemory=Native $wsl @('--distribution',$name,'--exec','/usr/bin/env','-i','PATH=/usr/sbin:/usr/bin:/sbin:/bin','DOCKER_HOST=unix:///var/run/docker.sock','/usr/bin/docker','info','--format','{{.ID}}/{{.OSType}}/{{.ServerVersion}}') 30 'linux-after-memory'
  $n=$result.engineAfterMemory
  $result.engineLiveAfterMemory=($n.exitCode -eq 0 -and $n.closed -and -not $n.timedOut -and -not $n.onlyOwnStartedRootStopped -and $null -eq $n.nativeError -and $null -eq $n.cleanupError -and $n.stdout.Trim() -ceq ($result.linuxEngine.engineId+'/linux/29.9.3'))
  if(-not $result.engineLiveAfterMemory){throw 'SAME_LINUX_ENGINE_MUST_BE_ALIVE_AFTER_RAM_MEASUREMENT'}
- $result.candidateHeadroom6144=($result.kernelStarted -and $result.linuxDockerProved -and $result.engineLiveAfterMemory -and $result.afterKernelFreeMiB -ge 6144)
+ $result.candidateHeadroom6144=($result.kernelStarted -and $result.linuxDockerProved -and $result.windowsBridgeQualified -and $result.engineLiveAfterMemory -and $result.afterKernelFreeMiB -ge 6144)
  if(-not $result.kernelStarted){throw 'ACTUAL_VERSION2_KERNEL_START_NOT_PROVED'}
  if(-not $result.candidateHeadroom6144){throw 'UNCHANGED6144_NOT_AVAILABLE_AFTER_KERNEL'}
 }catch{$result.failure=$_.Exception.Message}
@@ -146,4 +150,4 @@ finally{
  try{$result.resultFilePublished=$true;[IO.File]::WriteAllText((Join-Path $out 'probe-result.json'),($result|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))}catch{$result.resultFilePublished=$false;$result.failure=if($null -eq $result.failure){'RESULT_FILE_PUBLICATION_FAILED'}else{$result.failure+';RESULT_FILE_PUBLICATION_FAILED'}}
  Write-Output ('HOSTED_WSL_CAPABILITY_JSON='+($result|ConvertTo-Json -Depth 20 -Compress))
 }
-if($null -ne $result.failure -or -not $result.kernelStarted -or -not $result.linuxDockerProved -or -not $result.engineLiveAfterMemory -or -not $result.candidateHeadroom6144 -or -not $result.cleanupVerified -or -not $result.resultFilePublished){throw 'HOSTED_CAPABILITY_NOT_QUALIFIED_SEE_PRESERVED_RESULT'}
+if($null -ne $result.failure -or -not $result.kernelStarted -or -not $result.linuxDockerProved -or -not $result.windowsBridgeQualified -or -not $result.engineLiveAfterMemory -or -not $result.candidateHeadroom6144 -or -not $result.cleanupVerified -or -not $result.resultFilePublished){throw 'HOSTED_CAPABILITY_NOT_QUALIFIED_SEE_PRESERVED_RESULT'}

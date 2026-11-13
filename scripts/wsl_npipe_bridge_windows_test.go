@@ -25,10 +25,15 @@ func TestRelayHelperProcess(t *testing.T) {
 		return
 	}
 	mode := os.Getenv("BRIDGE_TEST_MODE")
-	if mode=="tail" {
-		data:=make([]byte,16); if _,err:=io.ReadFull(os.Stdin,data); err!=nil { os.Exit(8) }
-		_,_=os.Stdout.Write(data[:8]); time.Sleep(40*time.Millisecond)
-		_,_=os.Stdout.Write(append(data[8:],[]byte("TAIL")...)); os.Exit(0)
+	if mode == "tail" {
+		data := make([]byte, 16)
+		if _, err := io.ReadFull(os.Stdin, data); err != nil {
+			os.Exit(8)
+		}
+		_, _ = os.Stdout.Write(data[:8])
+		time.Sleep(40 * time.Millisecond)
+		_, _ = os.Stdout.Write(append(data[8:], []byte("TAIL")...))
+		os.Exit(0)
 	}
 	if mode == "blocked" {
 		time.Sleep(30 * time.Second)
@@ -51,7 +56,7 @@ func helperCommand(mode string) func(string) *exec.Cmd {
 	return func(string) *exec.Cmd {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestRelayHelperProcess$")
 		cmd.Env = append(minimalWindowsEnvironment(), "BRIDGE_TEST_HELPER=1", "BRIDGE_TEST_MODE="+mode)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow:true,CreationFlags:windows.CREATE_NO_WINDOW}
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 		return cmd
 	}
 }
@@ -286,8 +291,8 @@ func TestListenerCloseCannotDefeatAggregateDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	l := &closeBlockingListener{release: make(chan struct{}), closed: make(chan struct{})}
-	nonce:=freshNonce(t)
-	b := &bridge{nonce: nonce, path: "\\\\.\\pipe\\hosted_wsl_"+nonce, listener: l, ctx: ctx, cancel: cancel, active: make(map[int]*relay), acceptDone: make(chan struct{})}
+	nonce := freshNonce(t)
+	b := &bridge{nonce: nonce, path: "\\\\.\\pipe\\hosted_wsl_" + nonce, listener: l, ctx: ctx, cancel: cancel, active: make(map[int]*relay), acceptDone: make(chan struct{})}
 	go func() { <-l.closed; close(b.acceptDone) }()
 	start := time.Now()
 	r := b.stop(60 * time.Millisecond)
@@ -311,65 +316,93 @@ func TestChildEnvironmentOmitsCredentialAndContextOverrides(t *testing.T) {
 }
 
 func TestAsymmetricEOFPreservesDelayedBinaryTail(t *testing.T) {
-	b:=fixtureBridge(t,"tail",5*time.Second)
-	ctx,cancel:=context.WithTimeout(context.Background(),3*time.Second); defer cancel()
-	conn,err:=winio.DialPipeContext(ctx,b.path); if err!=nil { t.Fatal("tail connection failed") }; defer conn.Close()
-	_=conn.SetDeadline(time.Now().Add(3*time.Second))
-	data:=[]byte{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,255}
-	if _,err=io.Copy(conn,bytes.NewReader(data)); err!=nil { t.Fatal("tail request failed") }
-	got,err:=io.ReadAll(conn)
-	if err!=nil || !bytes.Equal(got,append(data,[]byte("TAIL")...)) { t.Fatal("asymmetric EOF lost the delayed response tail") }
-	waitRecords(t,b,1)
-	if !b.stop(3*time.Second).Qualified { t.Fatal("asymmetric relay was not clean") }
+	b := fixtureBridge(t, "tail", 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := winio.DialPipeContext(ctx, b.path)
+	if err != nil {
+		t.Fatal("tail connection failed")
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	data := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 255}
+	if _, err = io.Copy(conn, bytes.NewReader(data)); err != nil {
+		t.Fatal("tail request failed")
+	}
+	got, err := io.ReadAll(conn)
+	if err != nil || !bytes.Equal(got, append(data, []byte("TAIL")...)) {
+		t.Fatal("asymmetric EOF lost the delayed response tail")
+	}
+	waitRecords(t, b, 1)
+	if !b.stop(3 * time.Second).Qualified {
+		t.Fatal("asymmetric relay was not clean")
+	}
 }
 
-type blockedCloseConn struct { release chan struct{} }
-func(c *blockedCloseConn) Read([]byte)(int,error){<-c.release;return 0,io.EOF}
-func(c *blockedCloseConn) Write(p []byte)(int,error){return len(p),nil}
-func(c *blockedCloseConn) Close()error{<-c.release;return nil}
-func(c *blockedCloseConn) LocalAddr()net.Addr{return nil}
-func(c *blockedCloseConn) RemoteAddr()net.Addr{return nil}
-func(c *blockedCloseConn) SetDeadline(time.Time)error{return nil}
-func(c *blockedCloseConn) SetReadDeadline(time.Time)error{return nil}
-func(c *blockedCloseConn) SetWriteDeadline(time.Time)error{return nil}
+type blockedCloseConn struct{ release chan struct{} }
+
+func (c *blockedCloseConn) Read([]byte) (int, error)         { <-c.release; return 0, io.EOF }
+func (c *blockedCloseConn) Write(p []byte) (int, error)      { return len(p), nil }
+func (c *blockedCloseConn) Close() error                     { <-c.release; return nil }
+func (c *blockedCloseConn) LocalAddr() net.Addr              { return nil }
+func (c *blockedCloseConn) RemoteAddr() net.Addr             { return nil }
+func (c *blockedCloseConn) SetDeadline(time.Time) error      { return nil }
+func (c *blockedCloseConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *blockedCloseConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestBlockedConnectionCloseStillClosesChildStdin(t *testing.T) {
-	conn:=&blockedCloseConn{release:make(chan struct{})}
+	conn := &blockedCloseConn{release: make(chan struct{})}
 	defer close(conn.release)
-	ctx,cancel:=context.WithTimeout(context.Background(),40*time.Millisecond); defer cancel()
-	rec:=runRelay(ctx,1,conn,helperCommand("echo")("unused"))
-	if rec.Qualified || !rec.RootWaitObserved || rec.ExitCode!=0 || rec.Forced || !rec.FilesClosed || rec.SDKCloseCompleted {
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	rec := runRelay(ctx, 1, conn, helperCommand("echo")("unused"))
+	if rec.Qualified || !rec.RootWaitObserved || rec.ExitCode != 0 || rec.Forced || !rec.FilesClosed || rec.SDKCloseCompleted {
 		t.Fatal("blocked SDK Close suppressed independent stdin/stream cleanup or became acceptance")
 	}
 }
 
-type lateTimerContext struct { context.Context; deadline time.Time }
-func(c lateTimerContext) Deadline()(time.Time,bool){return c.deadline,true}
+type lateTimerContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c lateTimerContext) Deadline() (time.Time, bool) { return c.deadline, true }
 
 func TestCancelledAndExpiredContextsDoNotStartRoots(t *testing.T) {
-	cancelled,cancel:=context.WithCancel(context.Background());cancel()
-	expired,dispose:=context.WithDeadline(context.Background(),time.Now().Add(-time.Second));defer dispose()
-	late:=lateTimerContext{Context:context.Background(),deadline:time.Now().Add(-time.Second)}
-	for _,ctx:=range []context.Context{cancelled,expired,late} {
-		cmd:=helperCommand("echo")("unused")
-		r:=runRelay(ctx,1,&faultConn{},cmd)
-		if r.Qualified || r.RootStarted || cmd.Process!=nil || !r.Cancelled { t.Fatal("nonlive context started a root or qualified") }
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, dispose := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer dispose()
+	late := lateTimerContext{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
+	for _, ctx := range []context.Context{cancelled, expired, late} {
+		cmd := helperCommand("echo")("unused")
+		r := runRelay(ctx, 1, &faultConn{}, cmd)
+		if r.Qualified || r.RootStarted || cmd.Process != nil || !r.Cancelled {
+			t.Fatal("nonlive context started a root or qualified")
+		}
 	}
 }
 
-type cancelReplyConn struct { reader *bytes.Reader; cancel context.CancelFunc }
-func(c *cancelReplyConn)Read(p []byte)(int,error){return c.reader.Read(p)}
-func(c *cancelReplyConn)Write(p []byte)(int,error){c.cancel();return len(p),nil}
-func(c *cancelReplyConn)Close()error{return nil}
-func(c *cancelReplyConn)LocalAddr()net.Addr{return nil}
-func(c *cancelReplyConn)RemoteAddr()net.Addr{return nil}
-func(c *cancelReplyConn)SetDeadline(time.Time)error{return nil}
-func(c *cancelReplyConn)SetReadDeadline(time.Time)error{return nil}
-func(c *cancelReplyConn)SetWriteDeadline(time.Time)error{return nil}
+type cancelReplyConn struct {
+	reader *bytes.Reader
+	cancel context.CancelFunc
+}
+
+func (c *cancelReplyConn) Read(p []byte) (int, error)       { return c.reader.Read(p) }
+func (c *cancelReplyConn) Write(p []byte) (int, error)      { c.cancel(); return len(p), nil }
+func (c *cancelReplyConn) Close() error                     { return nil }
+func (c *cancelReplyConn) LocalAddr() net.Addr              { return nil }
+func (c *cancelReplyConn) RemoteAddr() net.Addr             { return nil }
+func (c *cancelReplyConn) SetDeadline(time.Time) error      { return nil }
+func (c *cancelReplyConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *cancelReplyConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestCompletionAndCancellationRaceCannotQualify(t *testing.T) {
-	ctx,cancel:=context.WithCancel(context.Background());defer cancel()
-	conn:=&cancelReplyConn{reader:bytes.NewReader([]byte("fixture")),cancel:cancel}
-	r:=runRelay(ctx,1,conn,helperCommand("echo")("unused"))
-	if r.Qualified || !r.Cancelled || r.ContextValidAtCompletion { t.Fatal("completion cases hid cancellation") }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn := &cancelReplyConn{reader: bytes.NewReader([]byte("fixture")), cancel: cancel}
+	r := runRelay(ctx, 1, conn, helperCommand("echo")("unused"))
+	if r.Qualified || !r.Cancelled || r.ContextValidAtCompletion {
+		t.Fatal("completion cases hid cancellation")
+	}
 }

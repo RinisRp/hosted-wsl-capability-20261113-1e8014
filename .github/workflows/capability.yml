@@ -1,5 +1,5 @@
 {
-  "name": "Generic Windows pipe bridge source qualification",
+  "name": "Generic Windows pipe Linux Docker capability",
   "on": {
     "workflow_dispatch": {
       "inputs": {
@@ -15,7 +15,7 @@
   },
   "jobs": {
     "source": {
-      "timeout-minutes": 15,
+      "timeout-minutes": 25,
       "steps": [
         {
           "name": "Checkout frozen generic bridge source",
@@ -37,6 +37,23 @@
             "name": "bridge-source-${{ inputs.nonce }}",
             "retention-days": 7,
             "path": "${{ steps.source.outputs.out_path }}",
+            "if-no-files-found": "error"
+          },
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        },
+        {
+          "name": "Qualify actual owned Windows CLI and Linux engine",
+          "id": "runtime",
+          "run": ".\\scripts\\probe-wsl.ps1",
+          "shell": "powershell"
+        },
+        {
+          "name": "Preserve bounded actual capability",
+          "if": "${{ always() && steps.runtime.outputs.out_path != '' }}",
+          "with": {
+            "name": "bridge-runtime-${{ inputs.nonce }}",
+            "retention-days": 7,
+            "path": "${{ steps.runtime.outputs.out_path }}",
             "if-no-files-found": "error"
           },
           "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"

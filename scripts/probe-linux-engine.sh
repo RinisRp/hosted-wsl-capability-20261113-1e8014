@@ -8,7 +8,7 @@ case "$nonce" in *[!0-9a-f]*|'') echo INVALID_NONCE >&2; exit 2;; esac
 export HOME=/root
 export DOCKER_HOST=unix:///var/run/docker.sock
 export DOCKER_CONFIG=/root/.docker
-apk add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/main --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/community docker-engine=29.9.3-r1 docker-cli=29.9.3-r1
+apk add --no-cache --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/main --repository https://dl-cdn.alpinelinux.org/alpine/v3.24/community docker-engine=29.9.3-r1 docker-cli=29.9.3-r1 socat=1.8.1.3-r0
 mkdir -p /var/lib/capability-docker /run/capability-docker
 dockerd --host=unix:///var/run/docker.sock --pidfile=/run/capability-docker/daemon.pid --data-root=/var/lib/capability-docker > /run/capability-docker/daemon.stdout 2> /run/capability-docker/daemon.stderr &
 # The daemon stays only in this newly owned distribution; the Windows owner

@@ -25,7 +25,7 @@ import (
 var noncePattern = regexp.MustCompile("^[0-9a-f]{32}$")
 
 type relayRecord struct {
-	Cancelled, ContextValidAtStart, ContextValidAtCompletion bool
+	Cancelled, ContextValidAtStart, ContextValidAtCompletion                     bool
 	ID, PID, ExitCode                                                            int
 	RootStarted, RootWaitObserved, InputFinished, OutputFinished, StderrFinished bool
 	SDKCloseCompleted, FilesClosed, Forced, TimedOut, StderrOverflow, Qualified  bool
@@ -37,7 +37,7 @@ type relayRecord struct {
 type bridgeReport struct {
 	// Active and Completed count handlers. Unknown* separately retains any
 	// unresolved resource accounting after an unsuccessful handler returns.
-	UnknownRoots, UnknownPumps, UnknownConnectionCloses int
+	UnknownRoots, UnknownPumps, UnknownConnectionCloses                int
 	Schema                                                             int
 	Nonce, Endpoint, OwnerSID, SDK                                     string
 	Accepted, Completed, Active                                        int
@@ -170,16 +170,22 @@ func expectedClosingError(err error, closing bool) bool {
 }
 
 func relayContextState(ctx context.Context) (bool, bool) {
-	err:=ctx.Err()
-	deadline,hasDeadline:=ctx.Deadline()
-	expired:=hasDeadline && !time.Now().Before(deadline)
-	return err==nil && !expired, expired || errors.Is(err,context.DeadlineExceeded)
+	err := ctx.Err()
+	deadline, hasDeadline := ctx.Deadline()
+	expired := hasDeadline && !time.Now().Before(deadline)
+	return err == nil && !expired, expired || errors.Is(err, context.DeadlineExceeded)
 }
 
 func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRecord {
 	rec := relayRecord{ID: id, ExitCode: -1, Faults: []string{}}
-	live,expired:=relayContextState(ctx)
-	if !live { rec.Cancelled=true; rec.TimedOut=expired; rec.Faults=append(rec.Faults,"CONTEXT_NOT_LIVE_BEFORE_SETUP"); go conn.Close(); return rec }
+	live, expired := relayContextState(ctx)
+	if !live {
+		rec.Cancelled = true
+		rec.TimedOut = expired
+		rec.Faults = append(rec.Faults, "CONTEXT_NOT_LIVE_BEFORE_SETUP")
+		go conn.Close()
+		return rec
+	}
 	var endpoints []*safeFile
 	makePipe := func() (*safeFile, *safeFile, error) {
 		r, w, err := os.Pipe()
@@ -210,9 +216,18 @@ func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRe
 		return rec
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = inR.file, outW.file, errW.file
-	live,expired=relayContextState(ctx)
-	if !live { rec.Cancelled=true; rec.TimedOut=expired; rec.Faults=append(rec.Faults,"CONTEXT_NOT_LIVE_BEFORE_START"); for _,f:=range endpoints { go f.close() }; go conn.Close(); return rec }
-	rec.ContextValidAtStart=true
+	live, expired = relayContextState(ctx)
+	if !live {
+		rec.Cancelled = true
+		rec.TimedOut = expired
+		rec.Faults = append(rec.Faults, "CONTEXT_NOT_LIVE_BEFORE_START")
+		for _, f := range endpoints {
+			go f.close()
+		}
+		go conn.Close()
+		return rec
+	}
+	rec.ContextValidAtStart = true
 	if err = cmd.Start(); err != nil {
 		for _, f := range endpoints {
 			_ = f.close()
@@ -262,11 +277,23 @@ func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRe
 	requestClose := func() {
 		cancelOnce.Do(func() {
 			closing.Store(true)
-			sdkDone:=make(chan bool,1)
-			parts:=make(chan bool,len(endpoints))
-			go func(){ sdkDone<-conn.Close()==nil }()
-			for _,f:=range endpoints { go func(f *safeFile){parts<-f.close()==nil}(f) }
-			go func(){ good:=true; for range endpoints { if !<-parts { good=false } }; filesDone<-good; sdkGood:=<-sdkDone; closeDone<-good && sdkGood }()
+			sdkDone := make(chan bool, 1)
+			parts := make(chan bool, len(endpoints))
+			go func() { sdkDone <- conn.Close() == nil }()
+			for _, f := range endpoints {
+				go func(f *safeFile) { parts <- f.close() == nil }(f)
+			}
+			go func() {
+				good := true
+				for range endpoints {
+					if !<-parts {
+						good = false
+					}
+				}
+				filesDone <- good
+				sdkGood := <-sdkDone
+				closeDone <- good && sdkGood
+			}()
 		})
 	}
 	var grace <-chan time.Time
@@ -305,7 +332,7 @@ func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRe
 				}
 			}
 		case <-ctxDone:
-			rec.Cancelled=true
+			rec.Cancelled = true
 			rec.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 			rec.Faults = append(rec.Faults, "RELAY_CANCELLED_BEFORE_COMPLETION")
 			requestClose()
@@ -322,7 +349,10 @@ func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRe
 				}
 			}
 		case <-final:
-			select { case rec.FilesClosed=<-filesDone: default: }
+			select {
+			case rec.FilesClosed = <-filesDone:
+			default:
+			}
 			rec.Faults = append(rec.Faults, "ROOT_OR_PUMP_TERMINAL_UNKNOWN")
 			return rec
 		}
@@ -336,9 +366,13 @@ func runRelay(ctx context.Context, id int, conn net.Conn, cmd *exec.Cmd) relayRe
 		rec.Faults = append(rec.Faults, "CLOSE_COMPLETION_UNKNOWN")
 	}
 	rec.StderrOverflow = stderr.overflow.Load()
-	live,expired=relayContextState(ctx)
-	rec.ContextValidAtCompletion=live
-	if !live { rec.Cancelled=true; rec.TimedOut=rec.TimedOut || expired; rec.Faults=append(rec.Faults,"CONTEXT_NOT_LIVE_AT_COMPLETION") }
+	live, expired = relayContextState(ctx)
+	rec.ContextValidAtCompletion = live
+	if !live {
+		rec.Cancelled = true
+		rec.TimedOut = rec.TimedOut || expired
+		rec.Faults = append(rec.Faults, "CONTEXT_NOT_LIVE_AT_COMPLETION")
+	}
 	if rec.StderrOverflow {
 		rec.Faults = append(rec.Faults, "STDERR_BOUND_EXCEEDED")
 	}
@@ -409,9 +443,23 @@ func (b *bridge) stop(timeout time.Duration) bridgeReport {
 	}
 	report.Qualified = report.Accepted > 0 && report.Active == 0 && report.Completed == report.Accepted && closed && acceptFinished && report.EndpointAbsentObserved && len(report.Faults) == 0
 	for _, r := range report.Records {
-		if r.RootStarted && !r.RootWaitObserved { report.UnknownRoots++ }
-		if r.RootStarted { if !r.InputFinished { report.UnknownPumps++ }; if !r.OutputFinished { report.UnknownPumps++ }; if !r.StderrFinished { report.UnknownPumps++ } }
-		if !r.SDKCloseCompleted { report.UnknownConnectionCloses++ }
+		if r.RootStarted && !r.RootWaitObserved {
+			report.UnknownRoots++
+		}
+		if r.RootStarted {
+			if !r.InputFinished {
+				report.UnknownPumps++
+			}
+			if !r.OutputFinished {
+				report.UnknownPumps++
+			}
+			if !r.StderrFinished {
+				report.UnknownPumps++
+			}
+		}
+		if !r.SDKCloseCompleted {
+			report.UnknownConnectionCloses++
+		}
 		if !r.Qualified {
 			report.Qualified = false
 		}
@@ -434,7 +482,7 @@ func launchWSL(distribution string) *exec.Cmd {
 	wsl := filepath.Join(os.Getenv("SystemRoot"), "System32", "wsl.exe")
 	cmd := exec.Command(wsl, "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
 	cmd.Env = minimalWindowsEnvironment()
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow:true, CreationFlags:windows.CREATE_NO_WINDOW}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd
 }
 
