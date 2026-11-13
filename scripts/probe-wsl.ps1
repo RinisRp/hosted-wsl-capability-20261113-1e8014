@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='a556b1088c9a48a7b901298967801275'
+$expectedNonce='d1e1522826b64651a632e610e43a060b'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')

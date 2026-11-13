@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$nonce='a556b1088c9a48a7b901298967801275'
+$nonce='d1e1522826b64651a632e610e43a060b'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:PROBE_NONCE -cne $nonce -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64'){throw 'EXACT_GENERIC_SOURCE_QUALIFICATION_CONTEXT_REQUIRED'}
 if($env:RUNNER_TEMP -cnotmatch '\A[A-Z]:\\[A-Za-z0-9_\\-]+\z'){throw 'OWNED_TEMP_PATH_REQUIRED'}
 $root=Join-Path $env:RUNNER_TEMP ('bridge-source-'+$nonce)

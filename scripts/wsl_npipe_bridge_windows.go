@@ -86,7 +86,7 @@ func openBridge(nonce, distribution string, factory func(string) *exec.Cmd, conn
 		return nil, err
 	}
 	path := "\\\\.\\pipe\\hosted_wsl_" + nonce
-	listener, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: sddl, MessageMode: false, InputBufferSize: 32768, OutputBufferSize: 32768})
+	listener, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: sddl, MessageMode: true, InputBufferSize: 32768, OutputBufferSize: 32768})
 	if err != nil {
 		return nil, errors.New("FRESH_LOCAL_PIPE_REQUIRED")
 	}
@@ -480,7 +480,7 @@ func minimalWindowsEnvironment() []string {
 
 func launchWSL(distribution string) *exec.Cmd {
 	wsl := filepath.Join(os.Getenv("SystemRoot"), "System32", "wsl.exe")
-	cmd := exec.Command(wsl, "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
+	cmd := exec.Command(wsl, "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "-t", "120", "STDIO", "UNIX-CONNECT:/var/run/docker.sock")
 	cmd.Env = minimalWindowsEnvironment()
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	return cmd

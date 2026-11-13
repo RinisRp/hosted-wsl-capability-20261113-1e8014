@@ -114,6 +114,9 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   }
   $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   if(-not (ReadyValid $r.Ready $owner $p.Id)){throw 'EXACT_OWN_BRIDGE_READY_REQUIRED'}
+  $clientVersion=DockerCall @('version','--format','{{.Client.Version}}') 20 'client-version'
+  if($clientVersion -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z._-]+)?\z' -or $clientVersion.Length -gt 64){throw 'BOUNDED_ACTUAL_WINDOWS_DOCKER_CLIENT_VERSION_REQUIRED'}
+  $r['WindowsDockerClientVersion']=$clientVersion
   $info=DockerCall @('info','--format','{{.ID}}/{{.OSType}}/{{.ServerVersion}}') 30 'initial-info'
   if($info -cne ($ExpectedEngine+'/linux/29.9.3')){throw 'SAME_NEW_LINUX_ENGINE_REQUIRED_BEFORE_MUTATION'}
   $r.InitialContainersEmpty=((DockerCall @('container','ls','--all','--quiet') 20 'initial-census') -ceq '')

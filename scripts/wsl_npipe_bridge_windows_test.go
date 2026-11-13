@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,6 +26,18 @@ func TestRelayHelperProcess(t *testing.T) {
 		return
 	}
 	mode := os.Getenv("BRIDGE_TEST_MODE")
+	if mode == "eof-tail" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			os.Exit(8)
+		}
+		time.Sleep(time.Second)
+		_, err = os.Stdout.Write(append(data, []byte("EOF-TAIL")...))
+		if err != nil {
+			os.Exit(9)
+		}
+		os.Exit(0)
+	}
 	if mode == "tail" {
 		data := make([]byte, 16)
 		if _, err := io.ReadFull(os.Stdin, data); err != nil {
@@ -336,6 +349,53 @@ func TestAsymmetricEOFPreservesDelayedBinaryTail(t *testing.T) {
 	waitRecords(t, b, 1)
 	if !b.stop(3 * time.Second).Qualified {
 		t.Fatal("asymmetric relay was not clean")
+	}
+}
+
+func TestMessageHalfClosePreservesDelayedBinaryTail(t *testing.T) {
+	b := fixtureBridge(t, "eof-tail", 6*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := winio.DialPipeContext(ctx, b.path)
+	if err != nil {
+		t.Fatal("half-close connection failed")
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	closer, ok := conn.(interface{ CloseWrite() error })
+	if !ok {
+		t.Fatal("message pipe must expose client CloseWrite")
+	}
+	data := bytes.Repeat([]byte{0, 255, 13, 10, 42}, 65537)
+	if _, err = io.Copy(conn, bytes.NewReader(data)); err != nil {
+		t.Fatal("half-close binary request failed")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- closer.CloseWrite() }()
+	select {
+	case err = <-closed:
+		if err != nil {
+			t.Fatal("client half-close failed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("client half-close exceeded its test deadline")
+	}
+	got, err := io.ReadAll(conn)
+	if err != nil || !bytes.Equal(got, append(data, []byte("EOF-TAIL")...)) {
+		t.Fatal("half-close lost delayed binary response")
+	}
+	waitRecords(t, b, 1)
+	if !b.stop(3 * time.Second).Qualified {
+		t.Fatal("half-close relay was not clean")
+	}
+}
+
+func TestWSLCommandHasFinitePostEOFDrain(t *testing.T) {
+	distribution := "hosted-wsl-0123456789abcdef0123456789abcdef"
+	cmd := launchWSL(distribution)
+	expected := []string{filepath.Join(os.Getenv("SystemRoot"), "System32", "wsl.exe"), "--distribution", distribution, "--exec", "/usr/bin/env", "-i", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "/usr/bin/socat", "-t", "120", "STDIO", "UNIX-CONNECT:/var/run/docker.sock"}
+	if strings.Join(cmd.Args, "|") != strings.Join(expected, "|") {
+		t.Fatal("finite post-EOF drain contract missing")
 	}
 }
 
