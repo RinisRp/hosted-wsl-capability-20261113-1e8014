@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='30cca2f6fd5a44339d58d43570734378'
+$expectedNonce='a556b1088c9a48a7b901298967801275'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')
@@ -34,12 +34,20 @@ $raw=Join-Path $root 'raw-native';[void][IO.Directory]::CreateDirectory($raw)
 [IO.File]::AppendAllText($env:GITHUB_OUTPUT,'out_path='+$out+[Environment]::NewLine)
 $name='hosted-wsl-'+$expectedNonce;$install=Join-Path $root 'distribution'
 $wsl=Join-Path $env:SystemRoot 'System32\wsl.exe'
-function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem){
+function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem,[string]$InputFile){
  foreach($a in $Arguments){if($a -match '[\s"&|<>]'){throw 'FIXED_NATIVE_ARGUMENTS_ONLY'}}
+ if(-not [string]::IsNullOrEmpty($InputFile)){
+  $expectedInput=Join-Path $root 'exec-input.txt'
+  if($InputFile -cne $expectedInput){throw 'EXACT_OWNED_ASCII_INPUT_PATH_REQUIRED'}
+  $inputItem=Get-Item -LiteralPath $InputFile -Force
+  if($inputItem.PSIsContainer -or ($inputItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $inputItem.Length -ne 32 -or [IO.File]::ReadAllText($InputFile) -cne $expectedNonce){throw 'EXACT_OWNED_ASCII_NONCE_INPUT_REQUIRED'}
+ }
  $stdout=Join-Path $raw ($Stem+'.stdout.txt');$stderr=Join-Path $raw ($Stem+'.stderr.txt')
  $p=$null;$timedOut=$false;$exitCode=$null;$closed=$false;$ownRootStopped=$false;$created=$null;$childId=$null;$nativeError=$null;$cleanupError=$null
  try{
-  $p=Start-Process -FilePath $File -ArgumentList $Arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  $start=@{FilePath=$File;ArgumentList=$Arguments;WindowStyle='Hidden';PassThru=$true;RedirectStandardOutput=$stdout;RedirectStandardError=$stderr}
+  if(-not [string]::IsNullOrEmpty($InputFile)){$start.RedirectStandardInput=$InputFile}
+  $p=Start-Process @start
   $childId=$p.Id;$handle=$p.Handle;if($null -eq $handle -or $handle -eq [IntPtr]::Zero){throw 'OWN_STARTED_CLIENT_HANDLE_REQUIRED'};$created=$p.StartTime.ToUniversalTime().ToString('o')
   if($p.WaitForExit($Seconds*1000)){$p.WaitForExit();$exitCode=$p.ExitCode;$closed=$p.HasExited}else{$timedOut=$true}
  }catch{$nativeError=$_.Exception.GetType().FullName}

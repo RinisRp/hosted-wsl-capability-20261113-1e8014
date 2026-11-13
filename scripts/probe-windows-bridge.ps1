@@ -1,5 +1,5 @@
 function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[string]$Distribution,[string]$ExpectedEngine){
- $r=[ordered]@{Schema=1;Nonce=$Nonce;Scope='GENERIC_WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_ONLY';Qualified=$false;Failure=$null;Endpoint=('npipe:////./pipe/hosted_wsl_'+$Nonce);BinarySHA256=$null;SourceQualification=$false;Native=@();Containers=@();InitialNetworks=@();FinalNetworks=@();BinaryBytes=262144;BinarySHA256Expected=$null;BinaryRoundTrip=$false;LoopbackHTTP=$false;LoopbackListeners=@();FinalPortAbsent=$false;InitialContainersEmpty=$false;FinalContainersEmpty=$false;AfterFreeMiB=$null;MemoryMeasuredUTC=$null;SameEngineAfterMemory=$false;Ready=$null;BridgeReport=$null;BridgeProcess=$null;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false}
+ $r=[ordered]@{Schema=1;Nonce=$Nonce;Scope='GENERIC_WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_EXEC_EOF_ONLY';Qualified=$false;Failure=$null;Endpoint=('npipe:////./pipe/hosted_wsl_'+$Nonce);BinarySHA256=$null;SourceQualification=$false;Native=@();Containers=@();InitialNetworks=@();FinalNetworks=@();BinaryBytes=262144;BinarySHA256Expected=$null;BinaryRoundTrip=$false;LoopbackHTTP=$false;ExecStdinEOF=$false;ExecDelaySeconds=$null;ExecInputSHA256=$null;ExecOutputSHA256=$null;ExecOutputBytes=$null;LoopbackListeners=@();FinalPortAbsent=$false;InitialContainersEmpty=$false;FinalContainersEmpty=$false;AfterFreeMiB=$null;MemoryMeasuredUTC=$null;SameEngineAfterMemory=$false;Ready=$null;BridgeReport=$null;BridgeProcess=$null;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false}
  $saved=[ordered]@{};$p=$null;$held=$false;$ready=Join-Path $Root 'bridge-ready.json';$stop=Join-Path $Root 'bridge-stop.txt';$report=Join-Path $Root 'bridge-report.json';$docker=$null;$prefix=@();$bridgeStarted=$false
  $objects=[Collections.Generic.List[object]]::new()
  function Latch([string]$Message){$r.Failure=if($null -eq $r.Failure){$Message}else{$r.Failure+';'+$Message}}
@@ -14,7 +14,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
  function Fields($Data,[string[]]$Keys){return ($null -ne $Data -and $Data -is [pscustomobject] -and (@($Data.PSObject.Properties.Name|Sort-Object) -join '|') -ceq (@($Keys|Sort-Object) -join '|'))}
  function Integer($Value){return ($Value -is [int] -or $Value -is [long])}
  function SourceManifestValid($Data){
-  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1')
+  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh')
   if(-not (Fields $Data $keys)){return $false}
   foreach($key in $keys){if($Data.$key -isnot [string] -or $Data.$key -cnotmatch '\A[0-9a-f]{64}\z'){return $false}}
   return $true
@@ -135,12 +135,13 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   if((DockerCall @('container','start','--attach',$bin.ID) 20 'binary-start') -cne $Nonce){throw 'OWN_BINARY_CONTAINER_OUTPUT_REQUIRED'}
   RemoveOwned $bin 'binary-cleanup'
   $http=[ordered]@{Name=('bridge-http-'+$Nonce);ID=$null;CreateAttempted=$true;StopAttempted=$false;RemoveAttempted=$false;Removed=$false};$objects.Add($http)
-  $created=DockerCall @('container','create','--name',$http.Name,'--hostname',('probe-'+$Nonce),'--label',('capabilityNonce='+$Nonce),'--network','bridge','--publish','127.0.0.1:55321:8080',$image,'/bin/busybox','httpd','-f','-p','8080','-h','/') 30 'http-create'
+  $created=DockerCall @('container','create','--name',$http.Name,'--hostname',('probe-'+$Nonce),'--label',('capabilityNonce='+$Nonce),'--network','bridge','--publish','127.0.0.1:55321:8080',$image,'/bin/sh','/capability-http.sh') 30 'http-create'
   if($created -cnotmatch '\A[0-9a-f]{64}\z'){throw 'EXACT_HTTP_CONTAINER_ID_REQUIRED'};$http.ID=$created
   $c=InspectOwned $http 'http-before-start'
   $binding=@($c.HostConfig.PortBindings.'8080/tcp')
   if($binding.Count -ne 1 -or $binding[0].HostIp -cne '127.0.0.1' -or $binding[0].HostPort -cne '55321'){throw 'EXACT_EXPLICIT_LOOPBACK_BINDING_REQUIRED'}
   [void](DockerCall @('cp',$inputFile,($http.ID+':/capability.bin')) 30 'http-copy-in')
+  foreach($scriptName in @('capability-http.sh','capability-exec.sh')){[void](DockerCall @('cp',(Join-Path $PSScriptRoot $scriptName),($http.ID+':/'+$scriptName)) 30 ('copy-'+$scriptName))}
   [void](DockerCall @('container','start',$http.ID) 20 'http-start')
   $httpLimit=[Diagnostics.Stopwatch]::StartNew();$httpBody=$null
   while($null -eq $httpBody -and $httpLimit.Elapsed.TotalSeconds -lt 45){
@@ -154,6 +155,17 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   $r.LoopbackListeners=@(PortListeners|Select-Object LocalAddress,LocalPort,OwningProcess)
   if($r.LoopbackListeners.Count -lt 1 -or @($r.LoopbackListeners|Where-Object {$_.LocalAddress -notin @('127.0.0.1','::1')}).Count){throw 'WINDOWS_LOCALHOST_ONLY_LISTENER_REQUIRED'}
   $r.LoopbackHTTP=$true
+  [void](InspectOwned $http 'exec-before-input')
+  $stdinFile=Join-Path $Root 'exec-input.txt';[IO.File]::WriteAllText($stdinFile,$Nonce,[Text.ASCIIEncoding]::new())
+  $execTimer=[Diagnostics.Stopwatch]::StartNew()
+  $exec=Native $docker ($prefix+@('exec','-i',$http.ID,'/bin/sh','/capability-exec.sh',$Nonce)) 20 'bridge-exec-stdin-eof' $stdinFile
+  $r.ExecDelaySeconds=$execTimer.Elapsed.TotalSeconds;$r.Native+=@{Name='exec-stdin-eof';Result=$exec}
+  # Check original redirected bytes as well as text; Native's WSL NUL cleanup
+  # must not conceal an unexpected byte in this ASCII exec witness.
+  $execRaw=Join-Path $Root 'raw-native\bridge-exec-stdin-eof.stdout.txt'
+  $r.ExecInputSHA256=(Get-FileHash -LiteralPath $stdinFile).Hash.ToLowerInvariant();$r.ExecOutputSHA256=(Get-FileHash -LiteralPath $execRaw).Hash.ToLowerInvariant();$r.ExecOutputBytes=(Get-Item -LiteralPath $execRaw).Length
+  $r.ExecStdinEOF=((CleanNative $exec) -and $exec.stdout -ceq $Nonce -and $exec.stderr -ceq '' -and $r.ExecOutputBytes -eq 32 -and $r.ExecInputSHA256 -ceq $r.ExecOutputSHA256 -and $r.ExecDelaySeconds -ge 1)
+  if(-not $r.ExecStdinEOF){throw 'EXACT_ASCII_STDIN_EOF_DELAYED_OUTPUT_AND_EXIT_REQUIRED'}
   RemoveOwned $http 'http-cleanup'
  }catch{Latch $_.Exception.Message}
  finally{
@@ -192,6 +204,6 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   foreach($key in $saved.Keys){try{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}catch{Latch 'PROCESS_DOCKER_ENVIRONMENT_RESTORE_FAILED'}}
   try{$r.FinalPortAbsent=(@(PortListeners).Count -eq 0);if(-not $r.FinalPortAbsent){throw 'WINDOWS_HTTP_LISTENER_CLEANUP_UNPROVED'}}catch{Latch $_.Exception.Message}
  }
- $r.Qualified=($null -eq $r.Failure -and $r.SourceQualification -and $r.BinaryRoundTrip -and $r.LoopbackHTTP -and $r.InitialContainersEmpty -and $r.FinalContainersEmpty -and $r.FinalPortAbsent -and $r.SameEngineAfterMemory -and $r.AfterFreeMiB -ge 6144 -and $null -ne $r.BridgeReport -and $r.BridgeReport.Qualified)
+ $r.Qualified=($null -eq $r.Failure -and $r.SourceQualification -and $r.BinaryRoundTrip -and $r.LoopbackHTTP -and $r.ExecStdinEOF -and $r.InitialContainersEmpty -and $r.FinalContainersEmpty -and $r.FinalPortAbsent -and $r.SameEngineAfterMemory -and $r.AfterFreeMiB -ge 6144 -and $null -ne $r.BridgeReport -and $r.BridgeReport.Qualified)
  return $r
 }
