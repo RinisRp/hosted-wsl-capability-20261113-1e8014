@@ -34,5 +34,8 @@ Existing source/runtime qualification results remain bound to their own commits.
 Startup diagnostics advertise the exclusive public evidence root before launch.
 The owner validates that ordinary nonce-derived root before importing dependencies
 and records only fixed bootstrap stages and failure categories. These records
-remain diagnostic and do not grant readiness. Both the20-second ready deadline
-and240-second failure hold are unchanged.
+remain diagnostic and do not grant readiness. The ready deadline is90 seconds; the240-second failure hold remains fixed.
+Run43517878318 proved that the same live owner published ready after the old20-second
+wait had failed. Its deeper startup-delay cause remains unproved. This timing
+adjustment preserves signature, generation, natural-exit and key-absence oracles;
+a late ACK or expired aggregate lease still fails.

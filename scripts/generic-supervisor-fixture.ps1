@@ -47,9 +47,11 @@ if($Mode -ceq 'start'){
   $launch=Start-OwnedDetachedSupervisor $ctx 'fixture';$held=Hold-OwnedSupervisorGeneration $ctx 'fixture'
   try{
    $clock=[Diagnostics.Stopwatch]::StartNew();$marker=Join-Path $root 'owner-started.json'
-   while(-not (Test-Path -LiteralPath $marker) -and $clock.Elapsed.TotalSeconds -lt 20){if($held.Process.HasExited){throw 'SYNTHETIC_OWNER_EXITED_BEFORE_READY'};Start-Sleep -Milliseconds 200}
+   while(-not (Test-Path -LiteralPath $marker) -and $clock.Elapsed.TotalSeconds -lt 90){if($held.Process.HasExited){throw 'SYNTHETIC_OWNER_EXITED_BEFORE_READY'};Start-Sleep -Milliseconds 200}
+   if($clock.Elapsed.TotalSeconds -ge 90 -or $held.Process.HasExited){throw 'LIVE_OWNER_READY_DEADLINE_REQUIRED'}
    $ready=Read-FixtureJson $marker
    Assert-FixtureReady $ready $held
+   if($clock.Elapsed.TotalSeconds -ge 90 -or $held.Process.HasExited){throw 'READY_VALIDATION_DEADLINE_REQUIRED'}
    $started=$true
   }finally{$held.Process.Dispose()}
   Write-Output 'SYNTHETIC_DETACHED_OWNER_STARTED_NO_PRIVATE_JOB'

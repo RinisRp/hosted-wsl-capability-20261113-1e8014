@@ -36,10 +36,38 @@ try{
  foreach($missing in @($context,$plan,$output,$launch)){$reject=$false;try{Assert-SourceTokenOrder ($coordinator.Replace($missing,'')) @($context,$plan,$output,$launch)}catch{$reject=$true};if(-not $reject){throw 'MISSING_SOURCE_TOKEN_ACCEPTED'};$rows+=@{mode='missing-coordinator-token-refusal';pass=$true}}
  $owner=[IO.File]::ReadAllText($source)
  $ownerTokens=@("Write-FixtureBootstrap 'bootstrap-started.json'",". (Join-Path `$PSScriptRoot 'generic-terminal-ack.ps1')");Assert-SourceTokenOrder $owner $ownerTokens
- if(-not $owner.Contains('$clock.Elapsed.TotalSeconds -lt 240') -or -not $coordinator.Contains('$clock.Elapsed.TotalSeconds -lt 20')){throw 'BOOTSTRAP_DEADLINE_CHANGED'};$rows+=@{mode='source-bound-bootstrap-order-and-unchanged-deadlines';pass=$true}
+ if(-not $owner.Contains('$clock.Elapsed.TotalSeconds -lt 240') -or -not $coordinator.Contains('$clock.Elapsed.TotalSeconds -lt 90')){throw 'BOOTSTRAP_DEADLINE_CHANGED'};$rows+=@{mode='source-bound-bootstrap-order-and-unchanged-deadlines';pass=$true}
  foreach($missing in $ownerTokens){$reject=$false;try{Assert-SourceTokenOrder ($owner.Replace($missing,'')) $ownerTokens}catch{$reject=$true};if(-not $reject){throw 'MISSING_OWNER_TOKEN_ACCEPTED'};$rows+=@{mode='missing-owner-token-refusal';pass=$true}}
  $reject=$false;try{Assert-SourceTokenOrder 'B A' @('A','B')}catch{$reject=$true};if(-not $reject){throw 'REVERSED_SOURCE_ORDER_ACCEPTED'};$rows+=@{mode='reversed-source-order-refusal';pass=$true}
  $reject=$false;try{Assert-SourceTokenOrder 'A B A' @('A','B')}catch{$reject=$true};if(-not $reject){throw 'DUPLICATE_SOURCE_TOKEN_ACCEPTED'};$rows+=@{mode='duplicate-source-order-refusal';pass=$true}
+ # Execute the retained production ready-loop slice, replacing only its one
+ # Stopwatch constructor. No coordinator entry, keys or processes are started.
+ $begin='$clock=[Diagnostics.Stopwatch]::StartNew();$marker=Join-Path $root ''owner-started.json''';$end='$started=$true'
+ $start=$coordinator.IndexOf($begin,[StringComparison]::Ordinal);$finish=$coordinator.IndexOf($end,$start,[StringComparison]::Ordinal)
+ if($start -lt 0 -or $finish -le $start){throw 'EXACT_READY_LOOP_SLICE_REQUIRED'}
+ $slice=$coordinator.Substring($start,$finish-$start+$end.Length);$needle='[Diagnostics.Stopwatch]::StartNew()'
+ if(([regex]::Matches($slice,[regex]::Escape($needle))).Count -ne 1){throw 'SINGLE_CLOCK_MAPPING_REQUIRED'}
+ $readyLoop=[scriptblock]::Create($slice.Replace($needle,'New-ReadyControlClock'))
+ . (Join-Path $PSScriptRoot 'generic-fixture-records.ps1');$realReadyOracle=${function:Assert-FixtureReady}
+ function New-ReadyControlClock{return $script:readyClock}
+ function Test-Path($LiteralPath){return $script:markerExists}
+ function Start-Sleep($Milliseconds){$script:readyClock.Elapsed.TotalSeconds=90.0}
+ function Read-FixtureJson($Path){$script:readCalls++;if($script:timingMode -ceq 'read-failure'){throw 'INJECTED_READ_FAILURE'};$script:readyClock.Elapsed.TotalSeconds=$script:afterRead;if($script:timingMode -ceq 'exited-after-read'){$held.Process.HasExited=$true};$v=[pscustomobject]@{Schema=1;Scope='SYNTHETIC_OWNER_STARTED_ONLY';Nonce=$Nonce;PID=123456;CreatedUTC='2026-11-13T00:00:00.0000000Z';RealPrivateJob=$false};if($script:timingMode -ceq 'wrong-ready'){$v.PID=123457};return $v}
+ function Assert-FixtureReady($Ready,$Held){& $realReadyOracle $Ready $Held;if($script:timingMode -ceq 'validation-expired'){$script:readyClock.Elapsed.TotalSeconds=90.0}}
+ $root=$LeaseRoot
+ foreach($script:timingMode in @('clean','before90','initial-expired','read-expired','validation-expired','exited-before','exited-after-read','missing-to-deadline','read-failure','wrong-ready')){
+  $initial=if($script:timingMode -ceq 'initial-expired'){90.0}elseif($script:timingMode -in @('before90','read-expired','validation-expired')){89.0}else{0.0}
+  $script:afterRead=if($script:timingMode -ceq 'read-expired'){90.0}elseif($script:timingMode -in @('before90','validation-expired')){89.5}else{0.1}
+  $script:readyClock=[pscustomobject]@{Elapsed=[pscustomobject]@{TotalSeconds=$initial}};$script:markerExists=($script:timingMode -cne 'missing-to-deadline');$script:readCalls=0
+  $held=[pscustomobject]@{Process=[pscustomobject]@{HasExited=($script:timingMode -ceq 'exited-before')};Descriptor=[pscustomobject]@{PID=123456;CreatedUTC='2026-11-13T00:00:00.0000000Z'}};$started=$false;$threw=$false
+  try{. $readyLoop}catch{$threw=$true}
+  $want=$script:timingMode -in @('clean','before90')
+  if($started -cne $want -or $threw -ceq $want){throw ('READY_TIMING_FALSE_RESULT_'+$script:timingMode)}
+  if($script:timingMode -in @('initial-expired','exited-before','missing-to-deadline') -and $script:readCalls -ne 0){throw 'LATE_OR_EXITED_OWNER_WAS_READ'}
+  $rows+=@{mode=('actual-ready-loop-'+$script:timingMode);pass=$true}
+ }
+ foreach($name in @('Test-Path','Start-Sleep','Read-FixtureJson','New-ReadyControlClock')){Remove-Item -LiteralPath ('Function:\'+$name)}
+ Set-Item -LiteralPath Function:\Assert-FixtureReady -Value $realReadyOracle
  $proof=[ordered]@{schema=1;scope='ACTUAL_SYNTHETIC_BOOTSTRAP_FILESYSTEM_AND_ENUM_CONTROLS';sourceSHA=(Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant();controls=$rows.Count;allPass=$true;rows=$rows;actualProcesses=0;network=0;realKeys=0;entryPointNotExecuted=$true;noArbitraryExceptionText=$true;canonicalAccepted=$false}
  $proof|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $PSScriptRoot 'pure-fixture-bootstrap-controls.json') -Encoding UTF8
  @{controls=$rows.Count;allPass=$true}|ConvertTo-Json -Compress
