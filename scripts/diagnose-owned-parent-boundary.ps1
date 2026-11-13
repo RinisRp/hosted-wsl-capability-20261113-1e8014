@@ -1,6 +1,6 @@
 # Explicit harmless diagnostic: never qualifies source, transport or a private job.
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
-$nonce='e63941839f2c42eb9d328d394f1f4aae'
+$nonce='90e620c965b847819f8a4b4205cf8027'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64' -or $env:PROBE_NONCE -cne $nonce -or $env:PARENT_DIAGNOSTIC -cne 'true' -or $env:GITHUB_SHA -cnotmatch '\A[0-9a-f]{40}\z'){throw 'EXACT_EXPLICIT_GENERIC_DIAGNOSTIC_CONTEXT_REQUIRED'}
 if($env:RUNNER_TEMP -cnotmatch '\A[A-Z]:\\[A-Za-z0-9_\\-]+\z'){throw 'OWNED_DIAGNOSTIC_TEMP_PATH_REQUIRED'}
 . (Join-Path $PSScriptRoot 'private-directory-helper.ps1')

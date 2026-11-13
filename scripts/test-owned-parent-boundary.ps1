@@ -55,6 +55,7 @@ exit 18
 $rows=@();$ownerClock=[Diagnostics.Stopwatch]::StartNew()
 function Remaining-OwnerWait([int]$Maximum){return [int][math]::Max(0,[math]::Min($Maximum,90000-$ownerClock.ElapsedMilliseconds))}
 for($case=0;$case -lt 2;$case++){
+ $result=$null;$parentElapsedSeconds=$null;$stage='CASE_SETUP'
  if((Remaining-OwnerWait 90000) -lt 40000){throw 'SYNTHETIC_OWNER_AGGREGATE_BUDGET_EXHAUSTED'}
  $root=Join-Path $base ('case-'+$case);New-OwnedPrivateDirectory $root $owner
  $raw=Join-Path $root 'raw';$out=Join-Path $root 'out';[void][IO.Directory]::CreateDirectory($raw);[void][IO.Directory]::CreateDirectory($out)
@@ -116,8 +117,15 @@ if($ownerClock.Elapsed.TotalSeconds -ge 90){throw 'SYNTHETIC_OWNER_AGGREGATE_DEA
  if($baseOwned){
   try{
    $flags=$null
-   if($null -ne (Get-Variable result -ErrorAction SilentlyContinue)){$flags=@{closed=[bool]$result.closed;timedOut=[bool]$result.timedOut;ownRootStopped=[bool]$result.onlyOwnStartedRootStopped;outputReadFailure=($result.nativeError -ceq 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');otherNativeFailure=($null -ne $result.nativeError -and $result.nativeError -cne 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');cleanupFault=($null -ne $result.cleanupError)}}
-   $sidecar=@{Schema=1;Scope='GENERIC_SYNTHETIC_FAILURE_ONLY';Code=$code;Stage=$stage;Flags=$flags;PrivateSession=$false}
+   if(($null -ne (Get-Variable result -ErrorAction SilentlyContinue)) -and $null -ne $result){$flags=@{closed=[bool]$result.closed;timedOut=[bool]$result.timedOut;ownRootStopped=[bool]$result.onlyOwnStartedRootStopped;outputReadFailure=($result.nativeError -ceq 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');otherNativeFailure=($null -ne $result.nativeError -and $result.nativeError -cne 'NATIVE_OUTPUT_READ_OR_PUBLICATION_FAILED');cleanupFault=($null -ne $result.cleanupError)}}
+   $parent=$null
+   if(($null -ne (Get-Variable result -ErrorAction SilentlyContinue)) -and $null -ne $result){
+    # Only fixed, public synthetic fixtures execute here; preserve bounded error
+    # context while retaining original lengths and an explicit prefix marker.
+    $parent=@{elapsedSeconds=$parentElapsedSeconds;exitCode=$result.exitCode;stdoutLength=$result.stdout.Length;stderrLength=$result.stderr.Length;stdoutPrefix=$result.stdout.Substring(0,[math]::Min(1024,$result.stdout.Length));stderrPrefix=$result.stderr.Substring(0,[math]::Min(2048,$result.stderr.Length));prefixesOnly=$true}
+   }
+   $caseNumber=if($null -ne (Get-Variable case -ErrorAction SilentlyContinue) -and $case -in @(0,1)){$case}else{-1}
+   $sidecar=@{Schema=2;Scope='GENERIC_SYNTHETIC_FAILURE_ONLY';Code=$code;Stage=$stage;Case=$caseNumber;Flags=$flags;Parent=$parent;PrivateSession=$false}
    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($sidecar|ConvertTo-Json -Depth 4 -Compress));if($bytes.Length -gt 8192){throw 'BOUNDED_SYNTHETIC_SIDECAR_REQUIRED'}
    $stream=[IO.File]::Open((Join-Path $base 'failure-status.json'),'CreateNew','Write','None');try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
   }catch{}
