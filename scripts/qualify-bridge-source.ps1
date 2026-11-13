@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$nonce='fc842b3a1cb946e7b7c1ac097de60304'
+$nonce='314dd453b2984bac974ed8aeefa18822'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:PROBE_NONCE -cne $nonce -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64'){throw 'EXACT_GENERIC_SOURCE_QUALIFICATION_CONTEXT_REQUIRED'}
 if($env:RUNNER_TEMP -cnotmatch '\A[A-Z]:\\[A-Za-z0-9_\\-]+\z'){throw 'OWNED_TEMP_PATH_REQUIRED'}
 $root=Join-Path $env:RUNNER_TEMP ('bridge-source-'+$nonce)
@@ -50,7 +50,7 @@ function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem){
  return [ordered]@{pid=$childId;createdUtc=$created;exitCode=$exitCode;timedOut=$timedOut;closed=$closed;onlyOwnStartedRootStopped=$ownRootStopped;nativeError=$nativeError;cleanupError=$cleanupError;stdout=$stdoutText;stderr=$stderrText}
 }
 $repo=Split-Path -Parent $PSScriptRoot
-$paths=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/owned-directory-helper.ps1','scripts/test-owned-directory.ps1')
+$paths=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/generic-host-disposition.ps1','scripts/opaque-private-session.ps1','scripts/private-directory-helper.ps1','scripts/run-opaque-private-session.ps1','scripts/test-generic-host-disposition.ps1','scripts/test-opaque-lifecycle-controls.ps1','scripts/test-opaque-packet-controls.ps1','scripts/test-owned-private-directory.ps1','scripts/test-opaque-deadline-controls.ps1')
 function SourceManifest{$m=[ordered]@{};foreach($rel in $paths){$m[$rel]=(Get-FileHash -LiteralPath (Join-Path $repo $rel)).Hash.ToLowerInvariant()};return $m}
 $result=[ordered]@{Schema=1;Scope='GENERIC_BRIDGE_SOURCE_QUALIFICATION_ONLY';Nonce=$nonce;SourceHead=$env:GITHUB_SHA;SourceManifest=(SourceManifest);CompilerVersion='go1.26.11';CompilerArchiveSHA256='71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0';Phases=@();OriginalSourceUnchanged=$false;RequiresFormatting=$null;BinarySHA256=$null;SourceQualified=$false;WSLCalls=0;DockerCalls=0;ProductionBridgeMainExecuted=$false;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false;Failure=$null;ResultFilePublished=$false;FinishedUTC=$null}
 $saved=[ordered]@{}
@@ -76,7 +76,11 @@ try{
   @{name='unit-tests';file=$go;args=@('test','-mod=readonly','-count=1','-timeout=60s','-json','./scripts');seconds=120},
   @{name='build-only';file=$go;args=@('build','-mod=readonly','-trimpath','-buildvcs=false','-o',(Join-Path $root 'bridge-source-only.exe'),'./scripts');seconds=120},
   @{name='module-verify';file=$go;args=@('mod','verify');seconds=60},
-  @{name='exclusive-directory-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-owned-directory.ps1'));seconds=60}
+  @{name='generic-disposition-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-generic-host-disposition.ps1'));seconds=60},
+  @{name='opaque-packet-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-opaque-packet-controls.ps1'));seconds=60},
+  @{name='opaque-lifecycle-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-opaque-lifecycle-controls.ps1'));seconds=60},
+  @{name='opaque-deadline-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-opaque-deadline-controls.ps1'));seconds=60},
+  @{name='private-directory-controls';file=(Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe');args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'test-owned-private-directory.ps1'));seconds=60}
  )
  foreach($v in $vectors){
   $p=Native $v.file $v.args $v.seconds $v.name

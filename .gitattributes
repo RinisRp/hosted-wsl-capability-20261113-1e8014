@@ -11,5 +11,12 @@ scripts/qualify-bridge-source.ps1 -text
 scripts/probe-windows-bridge.ps1 -text
 scripts/capability-http.sh -text
 scripts/capability-exec.sh -text
-scripts/owned-directory-helper.ps1 -text
-scripts/test-owned-directory.ps1 -text
+scripts/generic-host-disposition.ps1 -text
+scripts/opaque-private-session.ps1 -text
+scripts/private-directory-helper.ps1 -text
+scripts/run-opaque-private-session.ps1 -text
+scripts/test-generic-host-disposition.ps1 -text
+scripts/test-opaque-lifecycle-controls.ps1 -text
+scripts/test-opaque-packet-controls.ps1 -text
+scripts/test-owned-private-directory.ps1 -text
+scripts/test-opaque-deadline-controls.ps1 -text

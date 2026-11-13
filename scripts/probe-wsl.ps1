@@ -1,7 +1,12 @@
+param([switch]$OpaquePrivateHost)
+$opaquePacket=[Environment]::GetEnvironmentVariable('OWNED_RUNNER_PACKET','Process')
+[Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',[System.Management.Automation.Language.NullString]::Value,'Process')
+if($OpaquePrivateHost -and [string]::IsNullOrWhiteSpace($opaquePacket)){throw 'OPAQUE_PRIVATE_PACKET_REQUIRED'}
+if(-not $OpaquePrivateHost -and -not [string]::IsNullOrWhiteSpace($opaquePacket)){$opaquePacket=$null;throw 'OPAQUE_PACKET_REFUSED_IN_GENERIC_PROBE'}
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='fc842b3a1cb946e7b7c1ac097de60304'
+$expectedNonce='314dd453b2984bac974ed8aeefa18822'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')
@@ -29,9 +34,23 @@ foreach($sidText in @($identity.User.Value,'S-1-5-18','S-1-5-32-544')){
  [void]$acl.AddAccessRule($rule)
 }
 Set-Acl -LiteralPath $root -AclObject $acl
-$out=Join-Path $root 'outputs';[void][IO.Directory]::CreateDirectory($out)
+$out=Join-Path $root $(if($OpaquePrivateHost){'private-diagnostics'}else{'outputs'});[void][IO.Directory]::CreateDirectory($out)
 $raw=Join-Path $root 'raw-native';[void][IO.Directory]::CreateDirectory($raw)
-[IO.File]::AppendAllText($env:GITHUB_OUTPUT,'out_path='+$out+[Environment]::NewLine)
+$genericDispositionPath=$null
+$script:opaqueReconciliationHeld=$false
+function Wait-OpaqueReconciliation{
+ if($script:opaqueReconciliationHeld){return}
+ $script:opaqueReconciliationHeld=$true
+ Write-Output 'OWNED_OPAQUE_HOST_FAILED_REQUIRES_PRIVATE_RECONCILIATION'
+ # Allow the exact private-job controller to cancel/reconcile its target
+ # before owned engine teardown. Expiry is failure, never cleanup acceptance.
+ $reconcileClock=[Diagnostics.Stopwatch]::StartNew()
+ while($reconcileClock.Elapsed.TotalSeconds -lt 600){Start-Sleep -Seconds 1}
+}
+if($OpaquePrivateHost){
+ $genericDirectory=Join-Path $root 'generic-disposition';[void][IO.Directory]::CreateDirectory($genericDirectory)
+ $genericDispositionPath=Join-Path $genericDirectory 'generic-host-disposition.json'
+}else{[IO.File]::AppendAllText($env:GITHUB_OUTPUT,'out_path='+$out+[Environment]::NewLine)}
 $name='hosted-wsl-'+$expectedNonce;$install=Join-Path $root 'distribution'
 $wsl=Join-Path $env:SystemRoot 'System32\wsl.exe'
 function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem,[string]$InputFile){
@@ -127,7 +146,14 @@ try{
  $result.linuxDockerProved=Test-LinuxEngineResult $e $expectedNonce
  if(-not $result.linuxDockerProved){throw 'ACTUAL_PINNED_LINUX_ENGINE_AND_CONTAINER_CLEANUP_REQUIRED'}
  . (Join-Path $PSScriptRoot 'probe-windows-bridge.ps1')
- $result.windowsBridge=Invoke-WindowsBridgeProbe $root $out $expectedNonce $name $result.linuxEngine.engineId
+ $runnerArchive=$null
+ if($OpaquePrivateHost){
+  $runnerArchive=Join-Path $root 'official-runner.zip'
+  Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/actions/runner/releases/download/v2.338.2/actions-runner-win-x64-2.338.2.zip' -OutFile $runnerArchive
+  if((Get-FileHash -LiteralPath $runnerArchive).Hash.ToLowerInvariant() -cne 'a1f17aa987fc8158bc7521d284912267a0d01b7c2c4684b33c86783b5e8221cc'){throw 'OFFICIAL_RUNNER_ARCHIVE_REQUIRED'}
+ }
+ $result.windowsBridge=Invoke-WindowsBridgeProbe $root $out $expectedNonce $name $result.linuxEngine.engineId $opaquePacket $runnerArchive
+ $opaquePacket=$null
  $result.windowsBridgeQualified=($null -ne $result.windowsBridge -and $result.windowsBridge.Qualified -ceq $true)
  if(-not $result.windowsBridgeQualified){throw 'WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_NOT_QUALIFIED'}
  $result.afterKernelFreeMiB=[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1024)
@@ -139,7 +165,7 @@ try{
  $result.candidateHeadroom6144=($result.kernelStarted -and $result.linuxDockerProved -and $result.windowsBridgeQualified -and $result.engineLiveAfterMemory -and $result.afterKernelFreeMiB -ge 6144)
  if(-not $result.kernelStarted){throw 'ACTUAL_VERSION2_KERNEL_START_NOT_PROVED'}
  if(-not $result.candidateHeadroom6144){throw 'UNCHANGED6144_NOT_AVAILABLE_AFTER_KERNEL'}
-}catch{$result.failure=$_.Exception.Message}
+}catch{$result.failure=$_.Exception.Message;if($OpaquePrivateHost){Wait-OpaqueReconciliation}}
 finally{
  try{
   $result.importOperationClosureProved=(-not $result.importAttempted -or ($null -ne $result.import -and $result.import.exitCode -eq 0 -and $result.import.closed -and -not $result.import.timedOut -and -not $result.import.onlyOwnStartedRootStopped -and $null -eq $result.import.nativeError -and $null -eq $result.import.cleanupError))
@@ -156,6 +182,14 @@ finally{
  }catch{$result.failure=if($null -eq $result.failure){$_.Exception.Message}else{$result.failure+';'+$_.Exception.Message}}
  $result.finishedUtc=[datetime]::UtcNow.ToString('o')
  try{$result.resultFilePublished=$true;[IO.File]::WriteAllText((Join-Path $out 'probe-result.json'),($result|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))}catch{$result.resultFilePublished=$false;$result.failure=if($null -eq $result.failure){'RESULT_FILE_PUBLICATION_FAILED'}else{$result.failure+';RESULT_FILE_PUBLICATION_FAILED'}}
- Write-Output ('HOSTED_WSL_CAPABILITY_JSON='+($result|ConvertTo-Json -Depth 20 -Compress))
+ if($OpaquePrivateHost){
+  try{
+   . (Join-Path $PSScriptRoot 'generic-host-disposition.ps1')
+   $safeDisposition=New-GenericHostDisposition $result $expectedNonce $env:GITHUB_SHA
+   Write-GenericHostDisposition $safeDisposition $genericDispositionPath
+   [IO.File]::AppendAllText($env:GITHUB_OUTPUT,'generic_disposition_file='+$genericDispositionPath+[Environment]::NewLine)
+   Write-Output ('GENERIC_OPAQUE_HOST_DISPOSITION_JSON='+($safeDisposition|ConvertTo-Json -Compress))
+  }catch{$result.failure=if($null -eq $result.failure){'GENERIC_DISPOSITION_PUBLICATION_FAILED'}else{$result.failure+';GENERIC_DISPOSITION_PUBLICATION_FAILED'};Write-Output 'GENERIC_OPAQUE_HOST_DISPOSITION_UNAVAILABLE'}
+ }else{Write-Output ('HOSTED_WSL_CAPABILITY_JSON='+($result|ConvertTo-Json -Depth 20 -Compress))}
 }
 if($null -ne $result.failure -or -not $result.kernelStarted -or -not $result.linuxDockerProved -or -not $result.windowsBridgeQualified -or -not $result.engineLiveAfterMemory -or -not $result.candidateHeadroom6144 -or -not $result.cleanupVerified -or -not $result.resultFilePublished){throw 'HOSTED_CAPABILITY_NOT_QUALIFIED_SEE_PRESERVED_RESULT'}

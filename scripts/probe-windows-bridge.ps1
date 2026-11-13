@@ -1,5 +1,6 @@
-function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[string]$Distribution,[string]$ExpectedEngine){
- $r=[ordered]@{Schema=1;Nonce=$Nonce;Scope='GENERIC_WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_EXEC_EOF_ONLY';Qualified=$false;Failure=$null;Endpoint=('npipe:////./pipe/hosted_wsl_'+$Nonce);BinarySHA256=$null;SourceQualification=$false;Native=@();Containers=@();InitialNetworks=@();FinalNetworks=@();BinaryBytes=262144;BinarySHA256Expected=$null;BinaryRoundTrip=$false;LoopbackHTTP=$false;ExecStdinEOF=$false;ExecDelaySeconds=$null;ExecInputSHA256=$null;ExecOutputSHA256=$null;ExecOutputBytes=$null;LoopbackListeners=@();FinalPortAbsent=$false;InitialContainersEmpty=$false;FinalContainersEmpty=$false;AfterFreeMiB=$null;MemoryMeasuredUTC=$null;SameEngineAfterMemory=$false;Ready=$null;BridgeReport=$null;BridgeProcess=$null;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false}
+function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[string]$Distribution,[string]$ExpectedEngine,[string]$PrivatePacket,[string]$RunnerArchive){
+ $privateSessionAttempted=$false
+ $r=[ordered]@{Schema=1;Nonce=$Nonce;Scope='GENERIC_WINDOWS_CLI_NPIPE_BINARY_LOOPBACK_EXEC_EOF_ONLY';Qualified=$false;PrivateSessionAccepted=$false;Failure=$null;Endpoint=('npipe:////./pipe/hosted_wsl_'+$Nonce);BinarySHA256=$null;SourceQualification=$false;Native=@();Containers=@();InitialNetworks=@();FinalNetworks=@();BinaryBytes=262144;BinarySHA256Expected=$null;BinaryRoundTrip=$false;LoopbackHTTP=$false;ExecStdinEOF=$false;ExecDelaySeconds=$null;ExecInputSHA256=$null;ExecOutputSHA256=$null;ExecOutputBytes=$null;LoopbackListeners=@();FinalPortAbsent=$false;InitialContainersEmpty=$false;FinalContainersEmpty=$false;AfterFreeMiB=$null;MemoryMeasuredUTC=$null;SameEngineAfterMemory=$false;Ready=$null;BridgeReport=$null;BridgeProcess=$null;PrivateProjectAccess=$false;JITGranted=$false;CanonicalAccepted=$false}
  $saved=[ordered]@{};$p=$null;$held=$false;$ready=Join-Path $Root 'bridge-ready.json';$stop=Join-Path $Root 'bridge-stop.txt';$report=Join-Path $Root 'bridge-report.json';$docker=$null;$prefix=@();$bridgeStarted=$false
  $objects=[Collections.Generic.List[object]]::new()
  function Latch([string]$Message){$r.Failure=if($null -eq $r.Failure){$Message}else{$r.Failure+';'+$Message}}
@@ -14,7 +15,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
  function Fields($Data,[string[]]$Keys){return ($null -ne $Data -and $Data -is [pscustomobject] -and (@($Data.PSObject.Properties.Name|Sort-Object) -join '|') -ceq (@($Keys|Sort-Object) -join '|'))}
  function Integer($Value){return ($Value -is [int] -or $Value -is [long])}
  function SourceManifestValid($Data){
-  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/owned-directory-helper.ps1','scripts/test-owned-directory.ps1')
+  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/generic-host-disposition.ps1','scripts/opaque-private-session.ps1','scripts/private-directory-helper.ps1','scripts/run-opaque-private-session.ps1','scripts/test-generic-host-disposition.ps1','scripts/test-opaque-lifecycle-controls.ps1','scripts/test-opaque-packet-controls.ps1','scripts/test-owned-private-directory.ps1','scripts/test-opaque-deadline-controls.ps1')
   if(-not (Fields $Data $keys)){return $false}
   foreach($key in $keys){if($Data.$key -isnot [string] -or $Data.$key -cnotmatch '\A[0-9a-f]{64}\z'){return $false}}
   return $true
@@ -170,7 +171,17 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   $r.ExecStdinEOF=((CleanNative $exec) -and $exec.stdout -ceq $Nonce -and $exec.stderr -ceq '' -and $r.ExecOutputBytes -eq 32 -and $r.ExecInputSHA256 -ceq $r.ExecOutputSHA256 -and $r.ExecDelaySeconds -ge 1)
   if(-not $r.ExecStdinEOF){throw 'EXACT_ASCII_STDIN_EOF_DELAYED_OUTPUT_AND_EXIT_REQUIRED'}
   RemoveOwned $http 'http-cleanup'
- }catch{Latch $_.Exception.Message}
+  if(-not [string]::IsNullOrEmpty($PrivatePacket)){
+   $privatePowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+   try{
+    [Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',$PrivatePacket,'Process')
+    $privateSessionAttempted=$true
+    $session=Native $privatePowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-opaque-private-session.ps1'),'-Nonce',$Nonce,'-Endpoint',$r.Endpoint,'-RunnerArchive',$RunnerArchive,'-LeaseRoot',$Root) 6120 'opaque-session-owner'
+   }finally{[Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',[System.Management.Automation.Language.NullString]::Value,'Process');$PrivatePacket=$null}
+   $r['PrivateSessionAccepted']=((CleanNative $session) -and $session.stdout.Trim() -ceq 'OWNED_OPAQUE_SESSION_OK' -and $session.stderr -ceq '')
+   if(-not $r.PrivateSessionAccepted){throw 'OPAQUE_PRIVATE_SESSION_OWNER_UNACCEPTED'}
+  }
+ }catch{Latch $_.Exception.Message;if($privateSessionAttempted){Wait-OpaqueReconciliation}}
  finally{
   foreach($obj in $objects){if(-not $obj.Removed){try{RemoveOwned $obj ('failure-cleanup-'+($objects.IndexOf($obj)))}catch{Latch $_.Exception.Message}}}
   $r.Containers=@($objects.ToArray())
