@@ -12,6 +12,12 @@
           "default": false,
           "required": false,
           "description": "Only harmless parent failure diagnostics; no source/runtime acceptance"
+        },
+        "supervisor_fixture": {
+          "type": "boolean",
+          "default": false,
+          "required": false,
+          "description": "Only harmless detached-process and signed terminal-ACK fixture; no agent or private session"
         }
       }
     }
@@ -69,7 +75,7 @@
         "PROBE_NONCE": "${{ inputs.nonce }}"
       },
       "runs-on": "windows-2025-vs2026",
-      "if": "${{ !inputs.parent_diagnostic }}"
+      "if": "${{ !inputs.parent_diagnostic && !inputs.supervisor_fixture }}"
     },
     "parent_diagnostic": {
       "env": {
@@ -103,8 +109,88 @@
           "if": "${{ always() && steps.diagnostic.outputs.out_path != '' }}"
         }
       ],
-      "if": "${{ inputs.parent_diagnostic }}",
+      "if": "${{ inputs.parent_diagnostic && !inputs.supervisor_fixture }}",
       "timeout-minutes": 5
+    },
+    "supervisor_fixture": {
+      "if": "${{ inputs.supervisor_fixture && !inputs.parent_diagnostic }}",
+      "runs-on": "windows-2025-vs2026",
+      "timeout-minutes": 10,
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "case": [
+            "zero",
+            "seven"
+          ]
+        },
+        "max-parallel": 1
+      },
+      "env": {
+        "PROBE_NONCE": "${{ inputs.nonce }}",
+        "FIXTURE_CASE": "${{ matrix.case }}"
+      },
+      "steps": [
+        {
+          "name": "Checkout frozen generic fixture",
+          "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+          "with": {
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "Verify pure ACK and nonreplay controls",
+          "shell": "powershell",
+          "run": ".\\scripts\\test-generic-terminal-ack.ps1\r\n.\\scripts\\test-terminal-ack-gate.ps1\n.\\scripts\\test-owned-supervisor-lifetime.ps1\r\n.\\scripts\\test-generic-fixture-records.ps1\r\n.\\scripts\\test-generic-fixture-publication.ps1"
+        },
+        {
+          "name": "Start harmless detached owner",
+          "id": "start",
+          "shell": "powershell",
+          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Start -Case $env:FIXTURE_CASE"
+        },
+        {
+          "name": "Observe owner across official artifact step",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "supervisor-start-${{ matrix.case }}-${{ inputs.nonce }}",
+            "retention-days": 7,
+            "if-no-files-found": "error",
+            "path": "${{ steps.start.outputs.out_path }}/public-context.json\r\n${{ steps.start.outputs.out_path }}/fixture-plan.json\r\n${{ steps.start.outputs.out_path }}/launch-intent-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-pid-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-generation-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-failure-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-restore-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/supervisor.json\r\n${{ steps.start.outputs.out_path }}/owner-started.json\r\n${{ steps.start.outputs.out_path }}/worker-terminal.json\r\n${{ steps.start.outputs.out_path }}/fixture-terminal-ack.txt\r\n${{ steps.start.outputs.out_path }}/observer-attached.json\r\n${{ steps.start.outputs.out_path }}/fixture-final.json\r\n${{ steps.start.outputs.out_path }}/cross-step-accepted.json\r\n${{ steps.start.outputs.out_path }}/fixture-failure.json\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stdout.txt\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stderr.txt"
+          }
+        },
+        {
+          "name": "Sign synthetic ACK only after known worker terminal",
+          "id": "sign",
+          "if": "${{ always() && steps.start.outcome == 'success' }}",
+          "shell": "powershell",
+          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Sign -Case $env:FIXTURE_CASE"
+        },
+        {
+          "name": "Hold same generation and await natural owner exit",
+          "id": "wait",
+          "if": "${{ always() && steps.start.outcome == 'success' && steps.sign.outcome == 'success' }}",
+          "shell": "powershell",
+          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Wait -Case $env:FIXTURE_CASE"
+        },
+        {
+          "name": "Reconcile only owned synthetic key and process",
+          "if": "${{ always() && steps.start.outcome != 'skipped' }}",
+          "shell": "powershell",
+          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Cleanup -Case $env:FIXTURE_CASE"
+        },
+        {
+          "name": "Preserve bounded synthetic final evidence",
+          "if": "${{ always() && steps.start.outputs.out_path != '' }}",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "with": {
+            "name": "supervisor-final-${{ matrix.case }}-${{ inputs.nonce }}",
+            "retention-days": 7,
+            "if-no-files-found": "error",
+            "path": "${{ steps.start.outputs.out_path }}/public-context.json\r\n${{ steps.start.outputs.out_path }}/fixture-plan.json\r\n${{ steps.start.outputs.out_path }}/launch-intent-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-pid-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-generation-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-failure-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-restore-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/supervisor.json\r\n${{ steps.start.outputs.out_path }}/owner-started.json\r\n${{ steps.start.outputs.out_path }}/worker-terminal.json\r\n${{ steps.start.outputs.out_path }}/fixture-terminal-ack.txt\r\n${{ steps.start.outputs.out_path }}/observer-attached.json\r\n${{ steps.start.outputs.out_path }}/fixture-final.json\r\n${{ steps.start.outputs.out_path }}/cross-step-accepted.json\r\n${{ steps.start.outputs.out_path }}/fixture-failure.json\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stdout.txt\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stderr.txt"
+          }
+        }
+      ]
     }
   }
 }

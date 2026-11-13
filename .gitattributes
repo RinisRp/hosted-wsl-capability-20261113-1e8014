@@ -22,3 +22,16 @@ scripts/test-owned-private-directory.ps1 -text
 scripts/test-opaque-deadline-controls.ps1 -text
 scripts/test-owned-parent-boundary.ps1 -text
 scripts/diagnose-owned-parent-boundary.ps1 -text
+SUPERVISOR_FIXTURE.md -text
+scripts/generic-fixture-records.ps1 -text
+scripts/generic-supervisor-fixture-owner.ps1 -text
+scripts/generic-supervisor-fixture-worker.ps1 -text
+scripts/generic-supervisor-fixture.ps1 -text
+scripts/generic-terminal-ack.ps1 -text
+scripts/owned-supervisor-lifetime.ps1 -text
+scripts/terminal-ack-gate.ps1 -text
+scripts/test-generic-fixture-publication.ps1 -text
+scripts/test-generic-fixture-records.ps1 -text
+scripts/test-generic-terminal-ack.ps1 -text
+scripts/test-owned-supervisor-lifetime.ps1 -text
+scripts/test-terminal-ack-gate.ps1 -text
