@@ -1,0 +1,51 @@
+{
+  "name": "Generic hosted WSL and Linux Docker capability",
+  "on": {
+    "workflow_dispatch": {
+      "inputs": {
+        "nonce": {
+          "required": true,
+          "type": "string"
+        }
+      }
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "probe": {
+      "runs-on": "windows-2025-vs2026",
+      "env": {
+        "PROBE_NONCE": "${{ inputs.nonce }}"
+      },
+      "timeout-minutes": 15,
+      "steps": [
+        {
+          "name": "Checkout exact generic capability source",
+          "with": {
+            "persist-credentials": false
+          },
+          "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+        },
+        {
+          "name": "Probe owned WSL and Linux engine",
+          "shell": "powershell",
+          "id": "probe",
+          "run": ".\\scripts\\probe-wsl.ps1"
+        },
+        {
+          "name": "Preserve capability evidence",
+          "with": {
+            "retention-days": 7,
+            "name": "hosted-capability-${{ inputs.nonce }}",
+            "path": "${{ steps.probe.outputs.out_path }}",
+            "if-no-files-found": "error"
+          },
+          "if": "${{ always() && steps.probe.outputs.out_path != '' }}",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        }
+      ]
+    }
+  }
+}

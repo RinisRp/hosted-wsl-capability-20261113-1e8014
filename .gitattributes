@@ -1,0 +1,5 @@
+.gitattributes -text
+.github/workflows/capability.yml -text
+scripts/probe-wsl.ps1 -text
+scripts/probe-linux-engine.sh -text
+README.md -text
