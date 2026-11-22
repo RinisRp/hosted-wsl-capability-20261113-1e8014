@@ -1,0 +1,7 @@
+SYNTHETIC ACK TRANSPORT FIXTURE ONLY.
+No real private target, runner registration, credential, database or canonical acceptance exists.
+The terminal flag and run1 are synthetic test values under an unrelated ephemeral key.
+This fixture must never authorize a real controller, private job or host teardown.
+Implementation source: 4b41818a091597cb57a2855773e3122d3add262c
+Public verification key: q01+0k/BQIj/6gblC+J76IftPMTNimILIXWRRFq7rPnaxYk9w5uqQcDi9GqkV5i+dLd5GPJv+cXwVh3EWmlRSPGpwyxoEUguEM5SHJSRCFuhKcwYawj0Hw4wdQfdewmHcbYR79xAABd16OYicOzKjQDsvJ0QuaA0FpNJ+J2jlbiUhhJU0wntfljzd+snTjzCxUKYvhytkMqGtF2PxfoJQD54PkyX6BLBYoNC17DY2x133siBAgsKIM0ou0zuVJMSu1/7zf+5DQXMyk34Q3qsi1z0MOrzSuTxltofsgbkoaa22zr789u4EzrY2NOLAU3qRuHAWMRj+h7RP0jIVBQcgrGZTv75I7Pjzwo6V7toLoiMawAZ8f0WeVDtHYeb+NsiaG2EEDzB4JTHBzcUDzQoz9gGokFDScayp86jn+/raa49zUIgcAoye+sNYQ9fDDofKSdUpgYfYissZpogUZIAleD83pkPVHB0GsLHOXmRvyEPTJIJ3DMgRdmb7BBcdlxlAQAB
+Context: {"PublicRepository":"RinisRp/hosted-wsl-capability-20261113-1e8014","Nonce":"78a5ed9dee0f4684a22a15da087a7ed6","SourceHead":"4b41818a091597cb57a2855773e3122d3add262c","Run":"1","Attempt":1,"KeyFingerprint":"a5a89fb630aca7d1374838f7a9e252e22c6c74e02e8e83b9d48af2c2055a271b"}
