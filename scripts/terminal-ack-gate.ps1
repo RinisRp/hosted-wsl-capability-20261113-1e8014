@@ -2,7 +2,7 @@
 # A negative result never permits owner/bridge/WSL teardown: its caller must
 # hold the VM until a valid terminal ACK or an explicitly failed hard expiry.
 function Wait-VerifiedGenericTerminalAck($Context,$PublicKeyBytes,$BridgeLeaseRemainingSeconds){
- $failure=[pscustomobject]@{Scope='ACK_GATE_ONLY_NOT_JOB_ACCEPTANCE';Verified=$false;RetryStopped=$true;PrivateJobAccepted=$false;CanonicalAccepted=$false;Receipt=$null}
+ $failure=[pscustomobject]@{Scope='ACK_GATE_ONLY_NOT_JOB_ACCEPTANCE';Verified=$false;RetryStopped=$true;PrivateJobAccepted=$false;CanonicalAccepted=$false;Receipt=$null;SignedBytes=[byte[]]@()}
  try{
   [void](Get-GenericAckContextPayload $Context)
   if((Get-GenericAckKeyFingerprint $PublicKeyBytes) -cne $Context.KeyFingerprint -or ($BridgeLeaseRemainingSeconds -isnot [int] -and $BridgeLeaseRemainingSeconds -isnot [long]) -or $BridgeLeaseRemainingSeconds -lt 0 -or $BridgeLeaseRemainingSeconds -gt 7200){return $failure}
@@ -22,12 +22,12 @@ function Wait-VerifiedGenericTerminalAck($Context,$PublicKeyBytes,$BridgeLeaseRe
     # A body at our immutable nonce-ref with invalid context/signature is an
     # integrity failure, not a transient absence. Do not retry it or hide a
     # verifier cleanup failure behind another attempt.
-    $receipt=Assert-GenericTerminalAck $query.Bytes $Context $PublicKeyBytes
+    $signed=[byte[]]($query.Bytes.Clone());$receipt=Assert-GenericTerminalAck $signed $Context $PublicKeyBytes
     if($receipt -isnot [pscustomobject] -or $receipt.Scope -cne 'VERIFIED_TERMINAL_ACK_PERMITS_OWNED_TEARDOWN_ONLY' -or $receipt.Nonce -cne $Context.Nonce -or $receipt.PublicSourceHead -cne $Context.SourceHead -or $receipt.PublicRun -cne $Context.Run -or $receipt.Attempt -ne 1){return $failure}
     foreach($key in @('TeardownPermitted','PrivateTargetTerminal')){if($receipt.$key -isnot [bool] -or $receipt.$key -cne $true){return $failure}}
     foreach($key in @('PrivateJobAccepted','CanonicalAccepted','MemoryErasureClaimed')){if($receipt.$key -isnot [bool] -or $receipt.$key -cne $false){return $failure}}
     if($clock.Elapsed.TotalSeconds -ge $budget -or $BridgeLeaseRemainingSeconds-$clock.Elapsed.TotalSeconds -lt 120){return $failure}
-    return [pscustomobject]@{Scope='ACK_GATE_ONLY_NOT_JOB_ACCEPTANCE';Verified=$true;RetryStopped=$true;PrivateJobAccepted=$false;CanonicalAccepted=$false;Receipt=$receipt}
+    return [pscustomobject]@{Scope='ACK_GATE_ONLY_NOT_JOB_ACCEPTANCE';Verified=$true;RetryStopped=$true;PrivateJobAccepted=$false;CanonicalAccepted=$false;Receipt=$receipt;SignedBytes=[byte[]]($signed.Clone())}
    }
    if($query.Bytes.Length -ne 0){return $failure}
    $sleep=[int][Math]::Min(2000,[Math]::Max(0,($budget-$clock.Elapsed.TotalSeconds-45)*1000))

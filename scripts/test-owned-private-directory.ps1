@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
-if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:PROBE_NONCE -cnotmatch '\A[0-9a-f]{32}\z'){throw 'EXACT_SYNTHETIC_DIRECTORY_CONTEXT_REQUIRED'}
+if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/issue-447-private-canonical-host' -or $env:PROBE_NONCE -cnotmatch '\A[0-9a-f]{32}\z'){throw 'EXACT_SYNTHETIC_DIRECTORY_CONTEXT_REQUIRED'}
 . (Join-Path $PSScriptRoot 'private-directory-helper.ps1')
 $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $base=Join-Path $env:RUNNER_TEMP ('directory-control-'+$env:PROBE_NONCE)

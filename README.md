@@ -1,3 +1,59 @@
+# One-step opaque integration preparation — not execution acceptance
+
+This branch prepares a single long, reviewed PowerShell step around the existing
+qualified Windows named-pipe transport. It is not a standing general-purpose CI
+service. The public source remains generic; one exact owned integration requires
+separate private controller admission, one-job JIT authority and current-source
+qualification before any private execution.
+
+Source qualification receives no private packet. The optional runtime step alone
+receives its opaque packet as an encrypted repository secret; public inputs carry
+only the nonce and public RSA3072 verification key. Private identities, repository
+source, credentials, logs and diagnostics are excluded from public artifacts. Only
+the reconstructed fixed-schema generic disposition may be uploaded afterward.
+
+A shared CreateNew claim spends the terminal-ACK network gate once. Only a signed
+context-bound ACK may permit bridge/WSL teardown. Stored signed bytes are rechecked
+at every boundary. That external terminal truth never rehabilitates an original
+failed session, forced cleanup, late I/O fault or unknown result. Missing/invalid
+ACKs preserve the host until its declared hard lease and remain failures; expiry
+never grants accepted cleanup or canonical success.
+
+The bridge keeps its finite7200-second monotonic lease. The private native wrapper
+has6750seconds; an actual private start requires6870seconds still inside that same
+bridge lease and at most30seconds of wrapper preparation. The listener retains
+its100-minute total and90-second connection budgets. The additional enclosure
+covers one600-second ACK allowance plus cleanup budget; synchronous OS operations
+are not claimed interruptible. The outer210-minute job has separate finite step
+bounds. The application's75-minute canonical limit and6144MiB admission are not
+changed. A private-owner timeout never force-stops that owner; unrelated generic
+native cleanup retains its original behavior.
+
+The private job-start hook checks the frozen repository, run/attempt, merge SHA,
+workflow path, job key and nonce before writing engine access to that job's
+initially empty environment file. The listener itself has no engine override.
+This hook does not identify a numeric REST job ID, PR head SHA or matrix sibling.
+The private controller must independently bind those values, prove a single
+non-matrix job and verify the actual runner assignment. A rejected hook can still
+be followed by workflow steps using always(); this is not an isolation boundary.
+
+Fourteen local PowerShell control phases pass, including actual parent/bridge
+failure propagation after a late ACK write fault. All PowerShell sources parse.
+The hosted-only private-directory and parent-boundary controls retain strict
+hosted context checks and are not represented as locally executed.
+
+Local PowerShell controls are preparation evidence only. Native Windows Go tests
+and the new genuine hosted integration remain unverified: local host policy
+refused the official formatter and vet binaries. No host policy was changed and
+no denied executable is retried. The historical outcomes below belong to their
+recorded commits and do not qualify this new candidate.
+All new source and fixture evidence is preparation only until genuine hosted
+qualification, real public200/signature transport, create-only ACK publication,
+private assignment/terminal checks, protected cleanup and the full consuming
+project gates are independently accepted. No private workload has been run by
+this local preparation. The historical sections below retain earlier outcomes.
+
+---
 ## Windows named-pipe transport qualification branch
 
 This branch first compiles and tests the generic Windows pipe adapter using Go1.26.11, Microsoft go-winio0.6.4 and x/sys0.49.0. Unit tests create nonce-owned local pipes and owned echo-test subprocesses. The workflow preserves unchanged source hashes, bounded diagnostics and formatter output without modifying source inputs. The earlier752f7a99 candidate passed source qualification only; its actual formatter output is included here.

@@ -1,4 +1,5 @@
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'owned-private-terminal-ack.ps1')
 $draftRoot=Join-Path ([IO.Path]::GetTempPath()) ('opaque-lifecycle-controls-'+[guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($draftRoot);$source=Join-Path $PSScriptRoot 'opaque-private-session.ps1'
 $t=$null;$e=$null;$a=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$t,[ref]$e)
 $session=@($a.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Invoke-OpaquePrivateRunnerSession'},$false))[0]
@@ -40,7 +41,7 @@ foreach($mode in @('chunk-valid','exact-bound','overflow','startup-overflow','eo
 }
 foreach($mode in @('all-clean','process-dispose-fault','file-dispose-fault','flush-fault','stream-close-fault','unowned-existing-root')){
  $receipt=@{Failure='ORIGINAL_SENTINEL';Faults=@('ORIGINAL_SENTINEL');Forced=$false;Closed=$false;ExitCode=0;CredentialFilesAbsent=$false}
- $start=$null;$encoded=$null;$packet=$null;$held=$true;$receiptWritten=$false;$privateRootOwned=$false
+ $start=$null;$encoded=$null;$packet=$null;$held=$true;$receiptWritten=$false;$privateRootOwned=$false;$terminalAuthority=$null
  $privateRoot=Join-Path $draftRoot ('lifecycle-fixture-'+[guid]::NewGuid().ToString('N'));[void][IO.Directory]::CreateDirectory($privateRoot)
  $sentinel=Join-Path $privateRoot 'private-session-receipt.json';[IO.File]::WriteAllText($sentinel,'untouched-synthetic-sentinel')
  $process=[pscustomobject]@{HasExited=$true;ExitCode=0;Disposes=0;DisposeFault=($mode -ceq 'process-dispose-fault')}

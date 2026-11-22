@@ -6,7 +6,7 @@ if(-not $OpaquePrivateHost -and -not [string]::IsNullOrWhiteSpace($opaquePacket)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:PSModulePath='C:\Windows\System32\WindowsPowerShell\v1.0\Modules'
-$expectedNonce='6566f2cbfb624edcb50ca54f6bc7a2ca'
+$expectedNonce='e8c01cf763004489a83044105dba19bb'
 $contextChecks=[ordered]@{
  githubActions=($env:GITHUB_ACTIONS -ceq 'true')
  hostedEnvironment=($env:RUNNER_ENVIRONMENT -ceq 'github-hosted')
@@ -14,7 +14,7 @@ $contextChecks=[ordered]@{
  exactActor=($env:GITHUB_ACTOR -ceq 'RinisRp')
  exactImage=($env:ImageOS -ceq 'win25-vs2026')
  exactArchitecture=($env:RUNNER_ARCH -ceq 'X64')
- exactRef=($env:GITHUB_REF -ceq 'refs/heads/codex/wsl-npipe-6f3465')
+ exactRef=($env:GITHUB_REF -ceq 'refs/heads/codex/issue-447-private-canonical-host')
  exactNonce=($env:PROBE_NONCE -ceq $expectedNonce)
 }
 $imageEnum=switch -CaseSensitive ($env:ImageOS){'win25'{'WIN25'} 'win25-vs2026'{'WIN25_VS2026'} $null{'MISSING'} default{'OTHER'}}
@@ -37,15 +37,35 @@ Set-Acl -LiteralPath $root -AclObject $acl
 $out=Join-Path $root $(if($OpaquePrivateHost){'private-diagnostics'}else{'outputs'});[void][IO.Directory]::CreateDirectory($out)
 $raw=Join-Path $root 'raw-native';[void][IO.Directory]::CreateDirectory($raw)
 $genericDispositionPath=$null
-$script:opaqueReconciliationHeld=$false
-function Wait-OpaqueReconciliation{
- if($script:opaqueReconciliationHeld){return}
- $script:opaqueReconciliationHeld=$true
- Write-Output 'OWNED_OPAQUE_HOST_FAILED_REQUIRES_PRIVATE_RECONCILIATION'
- # Allow the exact private-job controller to cancel/reconcile its target
- # before owned engine teardown. Expiry is failure, never cleanup acceptance.
- $reconcileClock=[Diagnostics.Stopwatch]::StartNew()
- while($reconcileClock.Elapsed.TotalSeconds -lt 600){Start-Sleep -Seconds 1}
+. (Join-Path $PSScriptRoot 'owned-private-terminal-ack.ps1')
+$script:OwnedPrivateLaunchMayHaveOccurred=$false
+$script:OwnedPrivateAckVerified=$false
+$script:OwnedPrivateAckOperationFailed=$false
+$script:OwnedPrivateAuthority=$null
+function Set-OwnedAckOperationFailure($Result){
+ if($script:OwnedPrivateAckOperationFailed){
+  $code='PRIVATE_TERMINAL_ACK_OPERATION_FAILED'
+  if($null -eq $Result.failure){$Result.failure=$code}elseif(-not $Result.failure.Contains($code)){$Result.failure+=';'+$code}
+ }
+}
+function Wait-OpaqueReconciliation {
+ if(-not $script:OwnedPrivateLaunchMayHaveOccurred){return}
+ if($null -eq $script:OwnedPrivateAuthority){throw 'PRIVATE_LAUNCH_WITHOUT_PINNED_AUTHORITY'}
+ $verdict=Confirm-OwnedTerminalAck $script:OwnedPrivateAuthority
+ if($verdict.Verified){$script:OwnedPrivateAckVerified=$true;return}
+ $script:OwnedPrivateAckOperationFailed=$true
+ [Console]::Out.WriteLine('OWNED_OPAQUE_ACK_UNPROVED_HOST_HELD_NOT_ACCEPTED')
+ # A sibling may still publish a signed memo. Rechecking that local signature
+ # never repeats the shared, spent network gate or erases the primary failure.
+ while((Get-OwnedTerminalRemaining $script:OwnedPrivateAuthority) -ge 120){
+  if(Test-Path -LiteralPath (Join-Path $script:OwnedPrivateAuthority.Root 'verified-terminal-ack.txt')){
+   $verdict=Confirm-OwnedTerminalAck $script:OwnedPrivateAuthority
+   if($verdict.Verified){$script:OwnedPrivateAckVerified=$true;return}
+  }
+  Start-Sleep -Milliseconds 500
+ }
+ [void](Wait-OwnedTerminalHardExpiry $script:OwnedPrivateAuthority)
+ $script:OwnedPrivateAckVerified=$false
 }
 if($OpaquePrivateHost){
  $genericDirectory=Join-Path $root 'generic-disposition';[void][IO.Directory]::CreateDirectory($genericDirectory)
@@ -73,10 +93,16 @@ function Native([string]$File,[string[]]$Arguments,[int]$Seconds,[string]$Stem,[
  finally{
   if($null -ne $p){
    try{
-    if(-not $p.HasExited){$p.Kill();$ownRootStopped=$true}
-    if(-not $p.WaitForExit(15000)){throw 'OWN_STARTED_NATIVE_ROOT_DID_NOT_CLOSE'}
-    $p.WaitForExit();$closed=$p.HasExited
-    if($null -eq $exitCode){$exitCode=$p.ExitCode}
+    if($Stem -ceq 'opaque-session-owner' -and -not $p.HasExited){
+     # This root may hold an active private job. A timeout is not permission
+     # to interrupt it; the separate signed terminal gate owns reconciliation.
+     $nativeError='PRIVATE_OWNER_TIMEOUT_PRESERVED_NO_FORCE';$closed=$false
+    }else{
+     if(-not $p.HasExited){$p.Kill();$ownRootStopped=$true}
+     if(-not $p.WaitForExit(15000)){throw 'OWN_STARTED_NATIVE_ROOT_DID_NOT_CLOSE'}
+     $p.WaitForExit();$closed=$p.HasExited
+     if($null -eq $exitCode){$exitCode=$p.ExitCode}
+    }
    }catch{$cleanupError=$_.Exception.GetType().FullName;$closed=$false}
    finally{try{$p.Dispose()}catch{$cleanupError=if($null -eq $cleanupError){'OWN_CLIENT_DISPOSE_FAILED'}else{$cleanupError+';OWN_CLIENT_DISPOSE_FAILED'}}}
   }
@@ -168,6 +194,7 @@ try{
 }catch{$result.failure=$_.Exception.Message;if($OpaquePrivateHost){Wait-OpaqueReconciliation}}
 finally{
  try{
+  if($OpaquePrivateHost -and $script:OwnedPrivateLaunchMayHaveOccurred){Wait-OpaqueReconciliation;if(-not (Test-OwnedPrivateCleanupAllowed $script:OwnedPrivateLaunchMayHaveOccurred $script:OwnedPrivateAckVerified)){throw 'PRIVATE_TERMINAL_ACK_REQUIRED_NO_WSL_TEARDOWN'}}
   $result.importOperationClosureProved=(-not $result.importAttempted -or ($null -ne $result.import -and $result.import.exitCode -eq 0 -and $result.import.closed -and -not $result.import.timedOut -and -not $result.import.onlyOwnStartedRootStopped -and $null -eq $result.import.nativeError -and $null -eq $result.import.cleanupError))
   $reg=@(OwnRegistration)
   if($result.importAttempted -and $reg.Count -eq 1){
@@ -180,6 +207,7 @@ finally{
   }elseif($reg.Count -eq 0){$result.cleanupVerified=$result.importOperationClosureProved}
   if(-not $result.cleanupVerified){throw 'OWN_DISTRO_CLEANUP_UNPROVED'}
  }catch{$result.failure=if($null -eq $result.failure){$_.Exception.Message}else{$result.failure+';'+$_.Exception.Message}}
+ Set-OwnedAckOperationFailure $result
  $result.finishedUtc=[datetime]::UtcNow.ToString('o')
  try{$result.resultFilePublished=$true;[IO.File]::WriteAllText((Join-Path $out 'probe-result.json'),($result|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))}catch{$result.resultFilePublished=$false;$result.failure=if($null -eq $result.failure){'RESULT_FILE_PUBLICATION_FAILED'}else{$result.failure+';RESULT_FILE_PUBLICATION_FAILED'}}
  if($OpaquePrivateHost){

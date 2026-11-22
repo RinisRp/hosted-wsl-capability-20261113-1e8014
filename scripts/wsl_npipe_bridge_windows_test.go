@@ -545,3 +545,34 @@ func TestCompletionAndCancellationRaceCannotQualify(t *testing.T) {
 		t.Fatal("completion cases hid cancellation")
 	}
 }
+
+func TestExactHostedBridgeContext(t *testing.T) {
+	nonce := strings.Repeat("a", 32)
+	good := map[string]string{"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "GITHUB_REPOSITORY": "RinisRp/hosted-wsl-capability-20261113-1e8014", "GITHUB_ACTOR": "RinisRp", "GITHUB_REF": "refs/heads/codex/issue-447-private-canonical-host", "PROBE_NONCE": nonce}
+	if !validHostedBridgeContext(func(k string) string { return good[k] }, nonce) {
+		t.Fatal("exact reviewed hosted context refused")
+	}
+	cases := []struct{ name, key, value string }{
+		{"old-ref", "GITHUB_REF", "refs/heads/codex/wsl-npipe-6f3465"},
+		{"ref-prefix", "GITHUB_REF", good["GITHUB_REF"] + "-foreign"},
+		{"other-repository", "GITHUB_REPOSITORY", "RinisRp/other"},
+		{"other-actor", "GITHUB_ACTOR", "other"},
+		{"not-hosted", "RUNNER_ENVIRONMENT", "self-hosted"},
+		{"nonce-mismatch", "PROBE_NONCE", strings.Repeat("b", 32)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			env := make(map[string]string, len(good))
+			for k, v := range good {
+				env[k] = v
+			}
+			env[c.key] = c.value
+			if validHostedBridgeContext(func(k string) string { return env[k] }, nonce) {
+				t.Fatal("foreign context accepted")
+			}
+		})
+	}
+	if validHostedBridgeContext(func(k string) string { return good[k] }, "bad-nonce") {
+		t.Fatal("invalid nonce accepted")
+	}
+}

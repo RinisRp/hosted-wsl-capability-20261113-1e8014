@@ -15,7 +15,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
  function Fields($Data,[string[]]$Keys){return ($null -ne $Data -and $Data -is [pscustomobject] -and (@($Data.PSObject.Properties.Name|Sort-Object) -join '|') -ceq (@($Keys|Sort-Object) -join '|'))}
  function Integer($Value){return ($Value -is [int] -or $Value -is [long])}
  function SourceManifestValid($Data){
-  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/generic-host-disposition.ps1','scripts/opaque-private-session.ps1','scripts/private-directory-helper.ps1','scripts/run-opaque-private-session.ps1','scripts/test-generic-host-disposition.ps1','scripts/test-opaque-lifecycle-controls.ps1','scripts/test-opaque-packet-controls.ps1','scripts/test-owned-private-directory.ps1','scripts/test-opaque-deadline-controls.ps1','scripts/test-owned-parent-boundary.ps1','scripts/diagnose-owned-parent-boundary.ps1')
+  $keys=@('.gitattributes','.github/workflows/capability.yml','README.md','scripts/probe-wsl.ps1','scripts/probe-linux-engine.sh','go.mod','go.sum','scripts/wsl_npipe_bridge_windows.go','scripts/wsl_npipe_bridge_windows_test.go','scripts/qualify-bridge-source.ps1','scripts/probe-windows-bridge.ps1','scripts/capability-http.sh','scripts/capability-exec.sh','scripts/generic-host-disposition.ps1','scripts/opaque-private-session.ps1','scripts/private-directory-helper.ps1','scripts/run-opaque-private-session.ps1','scripts/test-generic-host-disposition.ps1','scripts/test-opaque-lifecycle-controls.ps1','scripts/test-opaque-packet-controls.ps1','scripts/test-owned-private-directory.ps1','scripts/test-opaque-deadline-controls.ps1','scripts/test-owned-parent-boundary.ps1','scripts/diagnose-owned-parent-boundary.ps1','scripts/generic-terminal-ack.ps1','scripts/terminal-ack-gate.ps1','scripts/generic-ack-http-core.ps1','scripts/read-owned-generic-ack.ps1','scripts/owned-generic-ack-http.ps1','scripts/owned-private-terminal-ack.ps1','scripts/test-owned-generic-ack-http.ps1','scripts/test-owned-generic-ack-child.ps1','scripts/test-owned-generic-ack-live-absence.ps1','scripts/test-owned-private-terminal-ack.ps1','scripts/test-private-native-preservation.ps1','scripts/test-private-root-reconciliation.ps1','scripts/test-generic-terminal-ack.ps1','scripts/test-terminal-ack-gate.ps1','scripts/test-private-wiring-contract.ps1','scripts/private-job-admission-core.ps1','scripts/owned-private-job-hook.ps1','scripts/test-private-job-admission.ps1')
   if(-not (Fields $Data $keys)){return $false}
   foreach($key in $keys){if($Data.$key -isnot [string] -or $Data.$key -cnotmatch '\A[0-9a-f]{64}\z'){return $false}}
   return $true
@@ -102,6 +102,7 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   $config=Join-Path $Root 'empty-docker-config';if(Test-Path -LiteralPath $config){throw 'FRESH_EMPTY_DOCKER_CONFIG_REQUIRED'};[void][IO.Directory]::CreateDirectory($config)
   $docker=(Get-Command docker.exe -ErrorAction Stop).Source;$prefix=@('--config',$config,'--host',$r.Endpoint)
   if(@(PortListeners).Count){throw 'UNUSED_WINDOWS_LOOPBACK_PORT_REQUIRED'}
+  $bridgeLeaseStartedTick=[Diagnostics.Stopwatch]::GetTimestamp()
   $p=Start-Process -FilePath $binary -ArgumentList @('--nonce',$Nonce,'--profile','extended','--distribution',$Distribution,'--ready',$ready,'--stop',$stop,'--report',$report) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $Root 'bridge-main.stdout') -RedirectStandardError (Join-Path $Root 'bridge-main.stderr')
   $bridgeStarted=$true
   $r.BridgeProcess=[ordered]@{PID=$null;CreatedUTC=$null;Closed=$false;ExitCode=$null;Forced=$false;CleanupError=$null}
@@ -175,14 +176,26 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
    $privatePowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
    try{
     [Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',$PrivatePacket,'Process')
-    $privateSessionAttempted=$true
-    $session=Native $privatePowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-opaque-private-session.ps1'),'-Nonce',$Nonce,'-Endpoint',$r.Endpoint,'-RunnerArchive',$RunnerArchive,'-LeaseRoot',$Root) 6120 'opaque-session-owner'
+    $script:OwnedPrivateAuthority=New-OwnedTerminalAuthority $Nonce $Root $bridgeLeaseStartedTick
+    $wrapperStartedTick=[Diagnostics.Stopwatch]::GetTimestamp()
+    Assert-OwnedPrivateStartBudget $script:OwnedPrivateAuthority $wrapperStartedTick
+    # Consumed BEFORE every possible private start; a missing PID is unknown.
+    $privateSessionAttempted=$true;$script:OwnedPrivateLaunchMayHaveOccurred=$true
+    $launch=[Text.UTF8Encoding]::new($false).GetBytes((@{Scope='PRIVATE_LAUNCH_MAY_OCCUR_NOT_ASSIGNMENT';Nonce=$Nonce;SourceHead=$env:GITHUB_SHA}|ConvertTo-Json -Compress))
+    Write-OwnedAckBytes $Root 'private-launch-spent.json' $launch
+    $session=Native $privatePowerShell @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'run-opaque-private-session.ps1'),'-Nonce',$Nonce,'-Endpoint',$r.Endpoint,'-RunnerArchive',$RunnerArchive,'-LeaseRoot',$Root,'-BridgeLeaseStartedTick',([string]$bridgeLeaseStartedTick),'-WrapperStartedTick',([string]$wrapperStartedTick)) 6750 'opaque-session-owner'
    }finally{[Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',[System.Management.Automation.Language.NullString]::Value,'Process');$PrivatePacket=$null}
    $r['PrivateSessionAccepted']=((CleanNative $session) -and $session.stdout.Trim() -ceq 'OWNED_OPAQUE_SESSION_OK' -and $session.stderr -ceq '')
    if(-not $r.PrivateSessionAccepted){throw 'OPAQUE_PRIVATE_SESSION_OWNER_UNACCEPTED'}
+   Wait-OpaqueReconciliation
+   if(-not $script:OwnedPrivateAckVerified){throw 'PRIVATE_TERMINAL_ACK_UNPROVED'}
   }
  }catch{Latch $_.Exception.Message;if($privateSessionAttempted){Wait-OpaqueReconciliation}}
  finally{
+  if($privateSessionAttempted){Wait-OpaqueReconciliation}
+  Set-OwnedAckOperationFailure $r
+  $cleanupPermitted=Test-OwnedPrivateCleanupAllowed $privateSessionAttempted $script:OwnedPrivateAckVerified
+  if($cleanupPermitted){
   foreach($obj in $objects){if(-not $obj.Removed){try{RemoveOwned $obj ('failure-cleanup-'+($objects.IndexOf($obj)))}catch{Latch $_.Exception.Message}}}
   $r.Containers=@($objects.ToArray())
   if($null -ne $docker -and $null -ne $r.Ready){
@@ -217,6 +230,11 @@ function Invoke-WindowsBridgeProbe([string]$Root,[string]$Out,[string]$Nonce,[st
   }
   foreach($key in $saved.Keys){try{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}catch{Latch 'PROCESS_DOCKER_ENVIRONMENT_RESTORE_FAILED'}}
   try{$r.FinalPortAbsent=(@(PortListeners).Count -eq 0);if(-not $r.FinalPortAbsent){throw 'WINDOWS_HTTP_LISTENER_CLEANUP_UNPROVED'}}catch{Latch $_.Exception.Message}
+   }else{
+   Latch 'PRIVATE_TERMINAL_ACK_UNPROVED_NO_BRIDGE_TEARDOWN'
+   foreach($key in $saved.Keys){try{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}catch{Latch 'PROCESS_DOCKER_ENVIRONMENT_RESTORE_FAILED'}}
+   if($null -ne $p){try{$p.Dispose()}catch{Latch 'UNACCEPTED_BRIDGE_HANDLE_DISPOSE_FAILED'}}
+  }
  }
  $r.Qualified=($null -eq $r.Failure -and $r.SourceQualification -and $r.BinaryRoundTrip -and $r.LoopbackHTTP -and $r.ExecStdinEOF -and $r.InitialContainersEmpty -and $r.FinalContainersEmpty -and $r.FinalPortAbsent -and $r.SameEngineAfterMemory -and $r.AfterFreeMiB -ge 6144 -and $null -ne $r.BridgeReport -and $r.BridgeReport.Qualified)
  return $r

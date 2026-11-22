@@ -1,23 +1,24 @@
 {
-  "name": "Generic Windows pipe Linux Docker capability",
+  "name": "Owned Windows transport qualification",
+  "run-name": "Owned Windows transport qualification ${{ inputs.nonce }}",
   "on": {
     "workflow_dispatch": {
       "inputs": {
         "nonce": {
-          "required": true,
-          "type": "string"
+          "type": "string",
+          "required": true
         },
-        "parent_diagnostic": {
-          "type": "boolean",
-          "default": false,
+        "private_host": {
           "required": false,
-          "description": "Only harmless parent failure diagnostics; no source/runtime acceptance"
+          "type": "boolean",
+          "description": "One opaque owned integration after source qualification",
+          "default": false
         },
-        "supervisor_fixture": {
-          "type": "boolean",
-          "default": false,
+        "ack_public_key": {
           "required": false,
-          "description": "Only harmless detached-process and signed terminal-ACK fixture; no agent or private session"
+          "type": "string",
+          "description": "Public RSA3072 verification key; never a private key",
+          "default": ""
         }
       }
     }
@@ -26,169 +27,85 @@
     "contents": "read"
   },
   "jobs": {
-    "source": {
-      "timeout-minutes": 25,
-      "steps": [
-        {
-          "name": "Checkout frozen generic bridge source",
-          "with": {
-            "persist-credentials": false
-          },
-          "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
-        },
-        {
-          "name": "Qualify source with pinned Go",
-          "id": "source",
-          "run": ".\\scripts\\qualify-bridge-source.ps1",
-          "shell": "powershell"
-        },
-        {
-          "name": "Preserve bounded source qualification",
-          "if": "${{ always() && steps.source.outputs.out_path != '' }}",
-          "with": {
-            "name": "bridge-source-${{ inputs.nonce }}",
-            "retention-days": 7,
-            "path": "${{ steps.source.outputs.out_path }}",
-            "if-no-files-found": "error"
-          },
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-        },
-        {
-          "name": "Qualify actual owned Windows CLI and Linux engine",
-          "id": "runtime",
-          "run": ".\\scripts\\probe-wsl.ps1",
-          "shell": "powershell"
-        },
-        {
-          "name": "Preserve bounded actual capability",
-          "if": "${{ always() && steps.runtime.outputs.out_path != '' }}",
-          "with": {
-            "name": "bridge-runtime-${{ inputs.nonce }}",
-            "retention-days": 7,
-            "path": "${{ steps.runtime.outputs.out_path }}",
-            "if-no-files-found": "error"
-          },
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-        }
-      ],
+    "qualification": {
+      "if": "${{ github.actor == 'RinisRp' && github.repository == 'RinisRp/hosted-wsl-capability-20261113-1e8014' && github.ref == 'refs/heads/codex/issue-447-private-canonical-host' }}",
+      "runs-on": "windows-2025-vs2026",
+      "timeout-minutes": 210,
       "env": {
         "PROBE_NONCE": "${{ inputs.nonce }}"
       },
-      "runs-on": "windows-2025-vs2026",
-      "if": "${{ !inputs.parent_diagnostic && !inputs.supervisor_fixture }}"
-    },
-    "parent_diagnostic": {
-      "env": {
-        "PROBE_NONCE": "${{ inputs.nonce }}",
-        "PARENT_DIAGNOSTIC": "true"
-      },
-      "runs-on": "windows-2025-vs2026",
       "steps": [
         {
-          "name": "Checkout frozen generic diagnostic",
-          "with": {
-            "persist-credentials": false
-          },
-          "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
-        },
-        {
-          "name": "Diagnose owned parent boundary",
-          "shell": "powershell",
-          "id": "diagnostic",
-          "run": ".\\scripts\\diagnose-owned-parent-boundary.ps1"
-        },
-        {
-          "name": "Preserve bounded parent diagnostic",
-          "with": {
-            "name": "parent-diagnostic-${{ inputs.nonce }}",
-            "retention-days": 7,
-            "if-no-files-found": "error",
-            "path": "${{ steps.diagnostic.outputs.out_path }}"
-          },
-          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-          "if": "${{ always() && steps.diagnostic.outputs.out_path != '' }}"
-        }
-      ],
-      "if": "${{ inputs.parent_diagnostic && !inputs.supervisor_fixture }}",
-      "timeout-minutes": 5
-    },
-    "supervisor_fixture": {
-      "if": "${{ inputs.supervisor_fixture && !inputs.parent_diagnostic }}",
-      "runs-on": "windows-2025-vs2026",
-      "timeout-minutes": 10,
-      "strategy": {
-        "fail-fast": false,
-        "matrix": {
-          "case": [
-            "zero",
-            "seven"
-          ]
-        },
-        "max-parallel": 1
-      },
-      "env": {
-        "PROBE_NONCE": "${{ inputs.nonce }}",
-        "FIXTURE_CASE": "${{ matrix.case }}"
-      },
-      "steps": [
-        {
-          "name": "Checkout frozen generic fixture",
+          "name": "Checkout exact generic source",
           "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+          "timeout-minutes": 10,
           "with": {
-            "persist-credentials": false
+            "persist-credentials": false,
+            "ref": "${{ github.sha }}"
           }
         },
         {
-          "name": "Verify pure ACK and nonreplay controls",
+          "name": "Qualify frozen generic source and controls",
+          "id": "source",
+          "timeout-minutes": 35,
           "shell": "powershell",
-          "run": ".\\scripts\\test-generic-terminal-ack.ps1\r\n.\\scripts\\test-terminal-ack-gate.ps1\n.\\scripts\\test-owned-supervisor-lifetime.ps1\r\n.\\scripts\\test-generic-fixture-records.ps1\r\n.\\scripts\\test-generic-fixture-publication.ps1\r\n.\\scripts\\test-generic-fixture-bootstrap.ps1"
+          "run": "$ErrorActionPreference='Stop'\n& .\\scripts\\qualify-bridge-source.ps1\n"
         },
         {
-          "name": "Start harmless detached owner",
-          "id": "start",
-          "shell": "powershell",
-          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Start -Case $env:FIXTURE_CASE"
-        },
-        {
-          "name": "Observe owner across official artifact step",
+          "name": "Preserve bounded generic source evidence",
           "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "timeout-minutes": 5,
           "with": {
-            "name": "supervisor-start-${{ matrix.case }}-${{ inputs.nonce }}",
-            "retention-days": 7,
-            "if-no-files-found": "error",
-            "path": "${{ steps.start.outputs.out_path }}/public-context.json\r\n${{ steps.start.outputs.out_path }}/fixture-plan.json\r\n${{ steps.start.outputs.out_path }}/launch-intent-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-pid-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-generation-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-failure-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-restore-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/supervisor.json\r\n${{ steps.start.outputs.out_path }}/owner-started.json\r\n${{ steps.start.outputs.out_path }}/worker-terminal.json\r\n${{ steps.start.outputs.out_path }}/fixture-terminal-ack.txt\r\n${{ steps.start.outputs.out_path }}/observer-attached.json\r\n${{ steps.start.outputs.out_path }}/fixture-final.json\r\n${{ steps.start.outputs.out_path }}/cross-step-accepted.json\r\n${{ steps.start.outputs.out_path }}/fixture-failure.json\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stdout.txt\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stderr.txt\r\n${{ steps.start.outputs.out_path }}/bootstrap-started.json"
+            "name": "owned-source-qualification",
+            "path": "${{ steps.source.outputs.out_path }}",
+            "retention-days": 14,
+            "if-no-files-found": "error"
+          },
+          "if": "${{ always() && steps.source.outputs.out_path != '' }}"
+        },
+        {
+          "id": "generic",
+          "name": "Probe generic Windows pipe and Linux engine",
+          "run": "$ErrorActionPreference='Stop'\n& .\\scripts\\probe-wsl.ps1\n",
+          "timeout-minutes": 30,
+          "if": "${{ success() && !inputs.private_host }}",
+          "shell": "powershell"
+        },
+        {
+          "id": "opaque",
+          "name": "Exercise one opaque owned integration",
+          "run": "$ErrorActionPreference='Stop'\n& .\\scripts\\probe-wsl.ps1 -OpaquePrivateHost\n",
+          "timeout-minutes": 145,
+          "if": "${{ success() && inputs.private_host }}",
+          "shell": "powershell",
+          "env": {
+            "OWNED_ACK_PUBLIC_KEY": "${{ inputs.ack_public_key }}",
+            "OWNED_RUNNER_PACKET": "${{ secrets.OWNED_RUNNER_PACKET }}"
           }
         },
         {
-          "name": "Sign synthetic ACK only after known worker terminal",
-          "id": "sign",
-          "if": "${{ always() && steps.start.outcome == 'success' }}",
-          "shell": "powershell",
-          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Sign -Case $env:FIXTURE_CASE"
-        },
-        {
-          "name": "Hold same generation and await natural owner exit",
-          "id": "wait",
-          "if": "${{ always() && steps.start.outcome == 'success' && steps.sign.outcome == 'success' }}",
-          "shell": "powershell",
-          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Wait -Case $env:FIXTURE_CASE"
-        },
-        {
-          "name": "Reconcile only owned synthetic key and process",
-          "if": "${{ always() && steps.start.outcome != 'skipped' }}",
-          "shell": "powershell",
-          "run": ".\\scripts\\generic-supervisor-fixture.ps1 -Mode Cleanup -Case $env:FIXTURE_CASE"
-        },
-        {
-          "name": "Preserve bounded synthetic final evidence",
-          "if": "${{ always() && steps.start.outputs.out_path != '' }}",
+          "name": "Preserve bounded generic capability evidence",
           "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "timeout-minutes": 5,
           "with": {
-            "name": "supervisor-final-${{ matrix.case }}-${{ inputs.nonce }}",
-            "retention-days": 7,
-            "if-no-files-found": "error",
-            "path": "${{ steps.start.outputs.out_path }}/public-context.json\r\n${{ steps.start.outputs.out_path }}/fixture-plan.json\r\n${{ steps.start.outputs.out_path }}/launch-intent-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-pid-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-generation-observed.json\r\n${{ steps.start.outputs.out_path }}/launch-failure-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/launch-restore-UNKNOWN.json\r\n${{ steps.start.outputs.out_path }}/supervisor.json\r\n${{ steps.start.outputs.out_path }}/owner-started.json\r\n${{ steps.start.outputs.out_path }}/worker-terminal.json\r\n${{ steps.start.outputs.out_path }}/fixture-terminal-ack.txt\r\n${{ steps.start.outputs.out_path }}/observer-attached.json\r\n${{ steps.start.outputs.out_path }}/fixture-final.json\r\n${{ steps.start.outputs.out_path }}/cross-step-accepted.json\r\n${{ steps.start.outputs.out_path }}/fixture-failure.json\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stdout.txt\r\n${{ steps.start.outputs.out_path }}/public-native/worker.stderr.txt\r\n${{ steps.start.outputs.out_path }}/bootstrap-started.json"
-          }
+            "name": "owned-generic-capability",
+            "path": "${{ steps.generic.outputs.out_path }}",
+            "retention-days": 14,
+            "if-no-files-found": "error"
+          },
+          "if": "${{ always() && !inputs.private_host && steps.generic.outputs.out_path != '' }}"
+        },
+        {
+          "name": "Preserve only reconstructed generic disposition",
+          "uses": "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+          "timeout-minutes": 5,
+          "with": {
+            "name": "owned-generic-disposition",
+            "path": "${{ steps.opaque.outputs.generic_disposition_file }}",
+            "retention-days": 14,
+            "if-no-files-found": "error"
+          },
+          "if": "${{ always() && inputs.private_host && steps.opaque.outputs.generic_disposition_file != '' }}"
         }
       ]
     }

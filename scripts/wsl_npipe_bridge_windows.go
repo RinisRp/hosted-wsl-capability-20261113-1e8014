@@ -537,6 +537,9 @@ func bridgeProfile(name string) (time.Duration, time.Duration, int, int, error) 
 	}
 }
 
+func validHostedBridgeContext(getenv func(string) string, nonce string) bool {
+	return getenv("GITHUB_ACTIONS") == "true" && getenv("RUNNER_ENVIRONMENT") == "github-hosted" && getenv("GITHUB_REPOSITORY") == "RinisRp/hosted-wsl-capability-20261113-1e8014" && getenv("GITHUB_ACTOR") == "RinisRp" && getenv("GITHUB_REF") == "refs/heads/codex/issue-447-private-canonical-host" && getenv("PROBE_NONCE") == nonce && noncePattern.MatchString(nonce)
+}
 func runMain() int {
 	nonce := flag.String("nonce", "", "")
 	distro := flag.String("distribution", "", "")
@@ -545,7 +548,7 @@ func runMain() int {
 	reportPath := flag.String("report", "", "")
 	profile := flag.String("profile", "capability", "")
 	flag.Parse()
-	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Getenv("GITHUB_REPOSITORY") != "RinisRp/hosted-wsl-capability-20261113-1e8014" || os.Getenv("GITHUB_ACTOR") != "RinisRp" || os.Getenv("GITHUB_REF") != "refs/heads/codex/wsl-npipe-6f3465" || os.Getenv("PROBE_NONCE") != *nonce || !noncePattern.MatchString(*nonce) {
+	if !validHostedBridgeContext(os.Getenv, *nonce) {
 		fmt.Fprintln(os.Stderr, "EXACT_GENERIC_HOSTED_BRIDGE_CONTEXT_REQUIRED")
 		return 2
 	}

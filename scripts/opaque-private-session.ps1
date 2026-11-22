@@ -2,6 +2,7 @@
 # Exact target-job authority, VM lifecycle and lease acquire/close/controller
 # must be supplied by a separate reviewed owner before any private execution.
 . (Join-Path $PSScriptRoot 'private-directory-helper.ps1')
+. (Join-Path $PSScriptRoot 'owned-private-terminal-ack.ps1')
 function Read-OpaqueRunnerPacket([string]$Encoded,[string]$Nonce,[string]$ExpectedPublicHead){
  try{
   if($Nonce -cnotmatch '\A[0-9a-f]{32}\z' -or $ExpectedPublicHead -cnotmatch '\A[0-9a-f]{40}\z' -or $Encoded.Length -gt 49152 -or $Encoded -cnotmatch '\A[A-Za-z0-9+/=]+\z'){throw 'INVALID'}
@@ -11,11 +12,12 @@ function Read-OpaqueRunnerPacket([string]$Encoded,[string]$Nonce,[string]$Expect
   if(($packet.schema -isnot [int] -and $packet.schema -isnot [long]) -or $packet.schema -ne 2 -or ($packet.runnerId -isnot [int] -and $packet.runnerId -isnot [long]) -or $packet.runnerId -lt 1){throw 'INVALID'}
   foreach($key in @('nonce','runnerName','repositoryUrl','publicSourceHead','encodedJitConfig')){if($packet.$key -isnot [string]){throw 'INVALID'}}
   if($packet.nonce -cne $Nonce -or $packet.runnerName -cne ('OWNED-WINDOWS-'+$Nonce.Substring(0,8)) -or $packet.repositoryUrl -cnotmatch '\Ahttps://github\.com/RinisRp/[A-Za-z0-9_.-]{1,100}\z' -or $packet.publicSourceHead -cne $ExpectedPublicHead -or $packet.encodedJitConfig -cnotmatch '\A[A-Za-z0-9+/=]+\z'){throw 'INVALID'}
-  $job=$packet.expectedJob;$jobKeys=@('runId','jobId','attempt','headSHA','mergeSHA','workflowPath')
+  $job=$packet.expectedJob;$jobKeys=@('runId','jobId','attempt','headSHA','mergeSHA','workflowPath','jobKey')
   if($job -isnot [pscustomobject] -or (@($job.PSObject.Properties.Name|Sort-Object) -join '|') -cne (@($jobKeys|Sort-Object) -join '|')){throw 'INVALID'}
   foreach($key in @('runId','jobId','attempt')){if(($job.$key -isnot [int] -and $job.$key -isnot [long]) -or $job.$key -lt 1){throw 'INVALID'}}
   foreach($key in @('headSHA','mergeSHA')){if($job.$key -isnot [string] -or $job.$key -cnotmatch '\A[0-9a-f]{40}\z'){throw 'INVALID'}}
   if($job.workflowPath -isnot [string] -or $job.workflowPath -cnotmatch '\A\.github/workflows/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}\.ya?ml\z'){throw 'INVALID'}
+  if($job.jobKey -isnot [string] -or $job.jobKey -cnotmatch '\A[A-Za-z_][A-Za-z0-9_-]{0,99}\z'){throw 'INVALID'}
   if($packet.expectedLabels -isnot [array] -or $packet.expectedLabels.Count -lt 1 -or $packet.expectedLabels.Count -gt 100){throw 'INVALID'}
   $labels=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   foreach($label in $packet.expectedLabels){if($label -isnot [string] -or $label -cnotmatch '\A[A-Za-z0-9_.-]{1,100}\z' -or -not $labels.Add($label)){throw 'INVALID'}}
@@ -28,16 +30,17 @@ function Read-OpaqueRunnerPacket([string]$Encoded,[string]$Nonce,[string]$Expect
   return [pscustomobject]@{Nonce=$Nonce;RunnerName=$packet.runnerName;RepositoryUrl=$packet.repositoryUrl;AgentId=$config.agentId;EncodedJitConfig=$packet.encodedJitConfig;ExpectedJob=$job;ExpectedLabels=$packet.expectedLabels;PublicSourceHead=$ExpectedPublicHead}
  }catch{throw [InvalidOperationException]::new('OPAQUE_RUNNER_PACKET_INVALID')}
 }
-function Invoke-OpaquePrivateRunnerSession([string]$Nonce,[string]$Endpoint,[string]$RunnerArchive,[string]$LeaseRoot){
+function Invoke-OpaquePrivateRunnerSession([string]$Nonce,[string]$Endpoint,[string]$RunnerArchive,[string]$LeaseRoot,[long]$BridgeLeaseStartedTick,[long]$WrapperStartedTick){
  $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
  $encoded=[Environment]::GetEnvironmentVariable('OWNED_RUNNER_PACKET','Process')
  [Environment]::SetEnvironmentVariable('OWNED_RUNNER_PACKET',[System.Management.Automation.Language.NullString]::Value,'Process')
- $packet=$null;$start=$null;$process=$null;$held=$false;$privateRoot=$null;$privateRootOwned=$false;$receiptWritten=$false;$channels=@()
+ $packet=$null;$start=$null;$process=$null;$held=$false;$privateRoot=$null;$privateRootOwned=$false;$receiptWritten=$false;$channels=@();$terminalAuthority=$null
  $receipt=[ordered]@{Schema=1;Scope='PRIVATE_AGENT_SESSION_ONLY_NOT_JOB_ACCEPTANCE';Nonce=$Nonce;RunnerName=$null;AgentId=$null;RepositoryUrl=$null;PID=$null;CreatedUTC=$null;ListeningObserved=$false;AfterAgentFreeMiB=$null;NaturalExit=$false;ExitCode=$null;Forced=$false;Closed=$false;AllStreamsEOF=$false;CredentialFilesAbsent=$false;PrivateLogsRemain=$true;Failure=$null;Faults=@();DispositionBasis='official ephemeral exit and provider contract; exact private terminal job evidence required';DirectDescendantCensus=$false;MemoryErasureClaimed=$false;CanonicalAccepted=$false}
  function SessionFault([string]$Code){if($null -eq $receipt.Failure){$receipt.Failure=$Code};$receipt.Faults+=@($Code)}
  try{
-  if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/wsl-npipe-6f3465' -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64' -or $env:PROBE_NONCE -cne $Nonce){throw 'EXACT_OWNED_SESSION_CONTEXT_REQUIRED'}
+  if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'RinisRp/hosted-wsl-capability-20261113-1e8014' -or $env:GITHUB_ACTOR -cne 'RinisRp' -or $env:GITHUB_REF -cne 'refs/heads/codex/issue-447-private-canonical-host' -or $env:ImageOS -cne 'win25-vs2026' -or $env:RUNNER_ARCH -cne 'X64' -or $env:PROBE_NONCE -cne $Nonce){throw 'EXACT_OWNED_SESSION_CONTEXT_REQUIRED'}
   if($Nonce -cnotmatch '\A[0-9a-f]{32}\z' -or $Endpoint -cne ('npipe:////./pipe/hosted_wsl_'+$Nonce) -or $LeaseRoot -cne (Join-Path $env:RUNNER_TEMP ('hosted-wsl-'+$Nonce))){throw 'EXACT_OWNED_SESSION_LEASE_REQUIRED'}
+  $terminalAuthority=Read-OwnedTerminalAuthority $Nonce $LeaseRoot $BridgeLeaseStartedTick
   $packet=Read-OpaqueRunnerPacket $encoded $Nonce $env:GITHUB_SHA;$encoded=$null
   $receipt.RunnerName=$packet.RunnerName;$receipt.AgentId=$packet.AgentId;$receipt.RepositoryUrl=$packet.RepositoryUrl;$receipt['ExpectedJob']=$packet.ExpectedJob;$receipt['ExpectedLabels']=$packet.ExpectedLabels;$receipt['PublicSourceHead']=$packet.PublicSourceHead
   if((Get-FileHash -LiteralPath $RunnerArchive).Hash.ToLowerInvariant() -cne 'a1f17aa987fc8158bc7521d284912267a0d01b7c2c4684b33c86783b5e8221cc'){throw 'OFFICIAL_RUNNER_ARCHIVE_REQUIRED'}
@@ -57,19 +60,33 @@ function Invoke-OpaquePrivateRunnerSession([string]$Nonce,[string]$Endpoint,[str
   foreach($key in @('SystemRoot','WINDIR','COMSPEC','SystemDrive','PATH','PATHEXT','TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA','ProgramFiles','ProgramFiles(x86)','ProgramData','CommonProgramFiles','CommonProgramFiles(x86)','NUMBER_OF_PROCESSORS','PROCESSOR_ARCHITECTURE','USERNAME','USERDOMAIN','HOMEDRIVE','HOMEPATH')){
    $value=[Environment]::GetEnvironmentVariable($key,'Process');if(-not [string]::IsNullOrEmpty($value)){$start.EnvironmentVariables[$key]=$value}
   }
-  $start.EnvironmentVariables['DOCKER_HOST']=$Endpoint;$start.EnvironmentVariables['DOCKER_CONFIG']=$config
+  # Only successful admission validation grants the endpoint through GITHUB_ENV.
+  # A wrong job's always() steps may still run, but receive neither override.
+  $guard=Join-Path $privateRoot 'job-admission';New-OwnedPrivateDirectory $guard $owner
+  foreach($name in @('private-job-admission-core.ps1','owned-private-job-hook.ps1')){
+   [IO.File]::WriteAllBytes((Join-Path $guard $name),[IO.File]::ReadAllBytes((Join-Path $PSScriptRoot $name)))
+   if((Get-FileHash -LiteralPath (Join-Path $guard $name)).Hash -cne (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash){throw 'EXACT_PRIVATE_ADMISSION_SOURCE_REQUIRED'}
+  }
+  $descriptor=[ordered]@{Schema=1;Scope='PRIVATE_ONE_JOB_ADMISSION_ONLY';Nonce=$Nonce;Repository=$packet.RepositoryUrl.Substring('https://github.com/'.Length);ExpectedJob=$packet.ExpectedJob}
+  $descriptorBytes=[Text.UTF8Encoding]::new($false).GetBytes(($descriptor|ConvertTo-Json -Depth 5 -Compress))
+  if($descriptorBytes.Length -gt 4096){throw 'PRIVATE_JOB_DESCRIPTOR_BOUND'}
+  $descriptorFile=[IO.File]::Open((Join-Path $guard 'expected-job.json'),'CreateNew','Write','None');try{$descriptorFile.Write($descriptorBytes,0,$descriptorBytes.Length);$descriptorFile.Flush($true)}finally{$descriptorFile.Dispose()}
+  [IO.File]::WriteAllText((Join-Path $config 'config.json'),'{"auths":{"https://index.docker.io/v1/":{}}}',[Text.UTF8Encoding]::new($false))
+  $start.EnvironmentVariables['ACTIONS_RUNNER_HOOK_JOB_STARTED']=Join-Path $guard 'owned-private-job-hook.ps1'
   $start.EnvironmentVariables['ACTIONS_RUNNER_INPUT_JITCONFIG']=$packet.EncodedJitConfig
   foreach($name in @('stdout','stderr')){
    $file=[IO.FileStream]::new((Join-Path $privateRoot ('listener.'+$name+'.log')),'CreateNew','Write','Read',1,$true)
    $channels+=@([pscustomobject]@{Name=$name;File=$file;Stream=$null;Buffer=(New-Object byte[] 16384);Pending=$null;Bytes=0L;EOF=$false;Closed=$false})
   }
+  Assert-OwnedPrivateStartBudget $terminalAuthority $WrapperStartedTick
+  $clock=[Diagnostics.Stopwatch]::StartNew()
   $process=[Diagnostics.Process]::Start($start)
   $handle=$process.Handle;if($null -eq $handle -or $handle -eq [IntPtr]::Zero){throw 'HELD_PRIVATE_SESSION_HANDLE_REQUIRED'};$held=$true
   $receipt.PID=$process.Id;$receipt.CreatedUTC=$process.StartTime.ToUniversalTime().ToString('o')
   $channels[0].Stream=$process.StandardOutput.BaseStream;$channels[1].Stream=$process.StandardError.BaseStream
   foreach($channel in $channels){$channel.Pending=$channel.Stream.ReadAsync($channel.Buffer,0,$channel.Buffer.Length)}
   $start.EnvironmentVariables['ACTIONS_RUNNER_INPUT_JITCONFIG']='';$packet.EncodedJitConfig='';$packet=$null
-  $clock=[Diagnostics.Stopwatch]::StartNew();$terminalClock=$null;$startup=[Text.StringBuilder]::new()
+  $terminalClock=$null;$startup=[Text.StringBuilder]::new()
   while($true){
    if($clock.Elapsed.TotalMinutes -ge 100){throw 'PRIVATE_SESSION_PARENT_DEADLINE'}
    if(-not $receipt.ListeningObserved -and $clock.Elapsed.TotalSeconds -ge 90){throw 'PRIVATE_SESSION_CONNECTION_DEADLINE'}
@@ -106,17 +123,11 @@ function Invoke-OpaquePrivateRunnerSession([string]$Nonce,[string]$Endpoint,[str
   if($null -ne $start){try{$start.EnvironmentVariables.Clear()}catch{SessionFault 'PRIVATE_CHILD_ENV_CLEAR_FAILED'}}
   $encoded=$null;if($null -ne $packet){$packet.EncodedJitConfig='';$packet=$null}
   if($null -ne $process){
-   try{
-    if(-not $process.HasExited){
-     if(-not $held){throw 'NO_HELD_HANDLE_NO_TERMINATION'}
-     $receipt.Forced=$true;SessionFault 'PRIVATE_OWN_ROOT_FORCED'
-     $process.Kill();if(-not $process.WaitForExit(15000)){throw 'PRIVATE_ROOT_CLOSURE_UNKNOWN'}
-    }
-    $receipt.Closed=$process.HasExited
-    if($null -eq $receipt.ExitCode){$receipt.ExitCode=$process.ExitCode}
-   }catch{SessionFault 'PRIVATE_OWN_ROOT_CLOSURE_FAILED'}
-  }
-  foreach($channel in $channels){
+   $rootResult=Reconcile-OwnedPrivateRoot $process $held $terminalAuthority
+   $receipt.Forced=$rootResult.Forced;$receipt.Closed=$rootResult.Closed
+   foreach($fault in $rootResult.Faults){SessionFault $fault}
+   try{if($process.HasExited -and $null -eq $receipt.ExitCode){$receipt.ExitCode=$process.ExitCode}}catch{SessionFault 'PRIVATE_EXIT_CODE_UNKNOWN'}
+  }  foreach($channel in $channels){
    if($null -ne $channel.Stream){try{$channel.Stream.Dispose();$channel.Closed=$true}catch{SessionFault 'PRIVATE_READ_STREAM_CLOSE_FAILED'}}
   }
   foreach($channel in $channels){
